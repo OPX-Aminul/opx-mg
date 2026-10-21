@@ -49,7 +49,7 @@ opx-mg                 user-facing CLI (this repo, POSIX sh)
   lib/vm.sh            start/stop QEMU, QMP helper
   lib/usb.sh           list / request / usbredirect / QMP hotplug
   lib/watch.sh         poll termux-usb -l, attach on connect
-  host/usbredirect     prebuilt aarch64 usbredir tool (release asset)
+  host/usbredirect     prebuilt aarch64/armv7a usbredir tool (release asset)
   host/opx-usb-shim.c  optional: wrap TERMUX_USB_FD as a libusb device
   guest/cloud-init/    seed ISO: firmware, modules, ssh, motd
   guest/build-image.sh how the release qcow2 is forged (CI / desktop)

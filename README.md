@@ -33,7 +33,7 @@ Stryker (rooted chroot). Those are documented in `docs/RESEARCH.md`.
 
 ## Requirements
 
-- Unrooted arm64 Android 8+
+- Unrooted Android 8+ with Termux (the CLI supports `aarch64` and `armv7a`)
 - [Termux](https://github.com/termux/termux-app) **and** [Termux:API](https://github.com/termux/termux-api) from the **same** source (F-Droid or GitHub, not Play Store)
 - USB OTG + a USB Wi-Fi adapter (Atheros AR9271 / Realtek 88xx / MT76 recommended)
 - ~3 GB free storage for the guest image
@@ -47,6 +47,9 @@ In Termux:
 pkg update
 pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git
 ```
+
+On 32-bit Termux, leave out the two QEMU packages: the `arm` repo does not
+ship them (see [Architectures](#architectures)).
 
 Install the **Termux:API APK** from the same source as Termux.
 
@@ -64,11 +67,25 @@ cd opx-mg
 ./bin/opx-mg setup
 ```
 
-`setup` downloads `usbredirect-aarch64` and the guest disk from this
+`setup` detects the Termux userspace arch (`aarch64` or `armv7a`), downloads
+the matching `usbredirect-<arch>` and shim, plus the guest disk, from this
 repo's [Releases](https://github.com/OPX-Aminul/opx-mg/releases). A GitHub
-Actions workflow builds those assets on every `v*` tag and on
+Actions workflow builds both arches on every `v*` tag and on
 `workflow_dispatch`. Until a release exists, setup falls back to the
 Ubuntu 24.04 cloud image.
+
+## Architectures
+
+| Host | USB binaries | Guest VM |
+|------|--------------|----------|
+| `aarch64` (64-bit Termux) | `usbredirect-aarch64` + `opx-usb-shim-aarch64.so` | `qemu-system-aarch64` from Termux |
+| `armv7a` (32-bit Termux) | `usbredirect-armv7a` + `opx-usb-shim-armv7a.so` | needs a custom QEMU via `OPX_QEMU_BIN` |
+
+There is nothing to choose: `setup`, `update`, and `doctor` read the arch of
+the running Termux userspace (a 32-bit Termux on a 64-bit phone reports
+`armv8l` and gets `armv7a` assets). 32-bit Termux's `arm` repo has
+`termux-api` but no QEMU package, so the guest VM cannot boot there with
+stock packages. `setup` says so instead of failing halfway.
 
 ## Use
 
@@ -104,9 +121,14 @@ opx-mg doctor
 opx-mg -u
 ```
 
-`opx-mg -u` (or `opx-mg update`) pulls the newest release: CLI tarball,
-`usbredirect-aarch64`, shim, seed ISO. Add `--image` to replace the guest
-disk (stop the VM first).
+`opx-mg doctor` prints the detected arch, QEMU path, guest disk, seed, and
+USB state. `opx-mg -u` (or `opx-mg update`) pulls the newest release: CLI
+tarball, `usbredirect-<arch>`, shim, seed ISO. Add `--image` to replace the
+guest disk (stop the VM first). Assets are re-selected by arch on every
+update, so a release published for both arches upgrades either host.
+
+Useful overrides: `OPX_QEMU_BIN` (QEMU binary), `OPX_MEM` / `OPX_SMP`
+(guest size), `OPX_MG_HOME` (state dir), `OPX_MG_REPO` (release repo).
 
 SSH is forwarded to `127.0.0.1:2222`.
 
@@ -122,6 +144,10 @@ Login: `opx` / `opx` (root password `opx`).
 
 - TCG is slow. Monitor-mode packet rates will not match a native
   NetHunter kernel.
+- 32-bit armv7a: architecture detection, `usbredirect-armv7a`, and the shim
+  are built and installed, but 32-bit Termux's repo has no QEMU package, so
+  the guest VM cannot start there. Point `OPX_QEMU_BIN` at a 32-bit QEMU
+  build if you have one. Guest defaults drop to 1G / 2 vCPU.
 - One `usbredirect` process per device.
 - Xiaomi / MIUI often reports full-speed dongles as low-speed
   (`Invalid ep0 maxpacket: 64`). That is a host-stack lie, not a Termux

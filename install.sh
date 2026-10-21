@@ -19,6 +19,22 @@ BIN="${PREFIX}/bin/opx-mg"
 TMP="${PREFIX}/tmp/opx-mg-install"
 mkdir -p "$DEST" "${PREFIX}/bin" "$TMP"
 
+detect_arch() {
+    case "$(uname -m 2>/dev/null || echo unknown)" in
+        aarch64|arm64)                   printf '%s' aarch64 ;;
+        armv7l|armv8l|armv7a|armv8a|arm) printf '%s' armv7a ;;
+        x86_64|amd64)                    printf '%s' x86_64 ;;
+        i?86)                            printf '%s' i686 ;;
+        *)                               printf '%s' unknown ;;
+    esac
+}
+
+ARCH=$(detect_arch)
+case "$ARCH" in
+    aarch64|armv7a) ;;
+    *) echo "opx-mg: warning: unsupported host arch '$ARCH' (releases ship aarch64 and armv7a)" >&2 ;;
+esac
+
 download() {
     url=$1 dest=$2
     if command -v curl >/dev/null 2>&1; then
@@ -28,7 +44,7 @@ download() {
     fi
 }
 
-echo "opx-mg: installing into $DEST"
+echo "opx-mg: installing into $DEST (host arch $ARCH)"
 
 installed=0
 if download "$API" "$TMP/latest.json"; then
@@ -85,8 +101,13 @@ echo "opx-mg: linked $BIN"
 echo "opx-mg: running setup (pulls usbredirect + guest disk from Releases)"
 "$BIN" setup || true
 echo
-echo "Next:"
-echo "  pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python"
+echo "Next (host arch: $ARCH):"
+if [ "$ARCH" = armv7a ]; then
+    echo "  pkg install termux-api xorriso python curl git"
+    echo "  # 32-bit Termux has no QEMU package: set OPX_QEMU_BIN if you have a build"
+else
+    echo "  pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git"
+fi
 echo "  # install the Termux:API APK from the same source as Termux"
 echo "  opx-mg"
 echo "Update later: opx-mg -u"

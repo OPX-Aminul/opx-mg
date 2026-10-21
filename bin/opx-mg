@@ -35,9 +35,20 @@ Usage:
   opx-mg usb attach DEV  permission + usbredirect + QMP usb-redir
   opx-mg usb detach DEV
   opx-mg watch           attach every newly plugged USB device
-  opx-mg doctor          dependency check
+  opx-mg doctor          dependencies, arch, VM and USB state
   opx-mg -u | update     download latest release binaries + CLI
   opx-mg update --image  also replace the guest disk
+
+Host arch is detected automatically (aarch64 or armv7a). setup and update
+pull the matching usbredirect-<arch> and shim from GitHub Releases.
+32-bit Termux has no QEMU package; set OPX_QEMU_BIN to a custom build.
+
+Environment:
+  OPX_QEMU_BIN   QEMU binary (default: qemu-system-aarch64)
+  OPX_MEM        guest RAM in MB (default: 2048; armv7a: 1024)
+  OPX_SMP        guest vCPUs (default: 4; armv7a: 2)
+  OPX_MG_HOME    runtime dir (default: \${PREFIX}/var/lib/opx-mg)
+  OPX_MG_REPO    release repo (default: OPX-Aminul/opx-mg)
 
 Plug a USB Wi-Fi adapter after the VM is up. Tap OK on the Android
 permission dialog. In the guest: lsusb, ip link, iw dev.

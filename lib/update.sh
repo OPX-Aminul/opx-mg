@@ -13,14 +13,25 @@ print((d.get("tag_name") or "").lstrip("v"))
 }
 
 opx_fetch_asset_force() {
-    name=$1 dest=$2
-    url=$(opx_github_asset_url "$name" 2>/dev/null || true)
-    if [ -z "$url" ]; then
-        warn "release asset $name not published yet"
+    _force_name=$1 _force_dest=$2
+    _force_url=$(opx_github_asset_url "$_force_name" 2>/dev/null || true)
+    if [ -z "$_force_url" ]; then
+        warn "release asset $_force_name not published yet"
         return 1
     fi
-    info "downloading $name"
-    opx_download "$url" "$dest"
+    info "downloading $_force_name"
+    opx_download "$_force_url" "$_force_dest"
+}
+
+opx_fetch_asset_any_force() {
+    # opx_fetch_asset_any_force DEST BASE — arch-specific first, then aliases
+    _af_dest=$1 _af_base=$2
+    for _af_name in $(opx_asset_candidates "$_af_base"); do
+        if opx_fetch_asset_force "$_af_name" "$_af_dest"; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 opx_refresh_cli_from_release() {
@@ -63,14 +74,17 @@ opx_cmd_update() {
     if [ -f "$OPX_ROOT/VERSION" ]; then
         OPX_MG_VERSION=$(tr -d ' \n' < "$OPX_ROOT/VERSION")
     fi
-    opx_fetch_asset_force "usbredirect-aarch64" "$OPX_BIN/usbredirect" && chmod +x "$OPX_BIN/usbredirect" || true
-    opx_fetch_asset_force "opx-usb-shim.so" "$OPX_BIN/opx-usb-shim.so" || true
-    opx_fetch_asset_force "seed.iso" "$OPX_IMAGES/seed.iso" || opx_build_seed || true
+    if opx_fetch_asset_any_force "$OPX_BIN/usbredirect" usbredirect; then
+        chmod +x "$OPX_BIN/usbredirect"
+        printf '%s\n' "$OPX_HOST_ARCH" > "$OPX_BIN/arch"
+    fi
+    opx_fetch_asset_any_force "$OPX_BIN/opx-usb-shim.so" shim || true
+    opx_fetch_asset_any_force "$OPX_IMAGES/seed.iso" seed || opx_build_seed || true
     if [ ! -f "$OPX_IMAGES/disk.qcow2" ] || [ "$force_image" -eq 1 ]; then
         if opx_qemu_running; then
             warn "VM is running — not replacing guest disk (stop first for --image)"
         else
-            opx_fetch_asset_force "opx-mg-ubuntu-arm64.qcow2" "$OPX_IMAGES/disk.qcow2" || true
+            opx_fetch_asset_any_force "$OPX_IMAGES/disk.qcow2" guest || true
         fi
     else
         info "guest disk kept (opx-mg update --image to replace)"

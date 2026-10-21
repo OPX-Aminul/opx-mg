@@ -45,12 +45,22 @@ jobs:
           ndk-version: r27c
           link-to-sdk: true
 
-      - name: Build usbredirect-aarch64
+      - name: Build usbredirect (aarch64 + armv7a)
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          TARGET_ARCHES: aarch64 armv7a
         run: |
           chmod +x host/build-android.sh
           ./host/build-android.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Verify host binaries
+        run: |
+          set -euo pipefail
+          for f in dist/usbredirect-aarch64 dist/usbredirect-armv7a \
+                   dist/opx-usb-shim-aarch64.so dist/opx-usb-shim-armv7a.so; do
+            test -s "$f"
+            file "$f"
+          done
 
       - name: Guest disk + seed ISO
         run: |
@@ -76,7 +86,9 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum usbredirect-aarch64 opx-usb-shim.so opx-mg-ubuntu-arm64.qcow2 seed.iso opx-mg-*.tar.gz > checksums.txt
+          sha256sum usbredirect-aarch64 usbredirect-armv7a \
+            opx-usb-shim-aarch64.so opx-usb-shim-armv7a.so opx-usb-shim.so \
+            opx-mg-ubuntu-arm64.qcow2 seed.iso opx-mg-*.tar.gz > checksums.txt
           cat checksums.txt
 
       - name: Publish GitHub Release
@@ -88,9 +100,12 @@ jobs:
           VERSION="${{ steps.ver.outputs.version }}"
           NOTES="opx-mg ${VERSION}
 
-          Assets for Termux aarch64:
-          - \`usbredirect-aarch64\` — usbredir server that wraps \`TERMUX_USB_FD\`
-          - \`opx-usb-shim.so\` — optional LD_PRELOAD open() shim
+          Host binaries (install/setup picks the one matching your Termux arch):
+          - \`usbredirect-aarch64\` / \`usbredirect-armv7a\` — usbredir server that wraps \`TERMUX_USB_FD\`
+          - \`opx-usb-shim-aarch64.so\` / \`opx-usb-shim-armv7a.so\` — optional LD_PRELOAD open() shim
+          - \`opx-usb-shim.so\` — legacy alias for the aarch64 shim
+
+          Shared assets:
           - \`opx-mg-ubuntu-arm64.qcow2\` — Ubuntu 24.04 guest disk
           - \`seed.iso\` — cloud-init (user opx / password opx)
           - \`opx-mg-${VERSION}.tar.gz\` — CLI + scripts
@@ -99,13 +114,16 @@ jobs:
           Update: \`opx-mg -u\`
           "
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/usbredirect-aarch64 dist/opx-usb-shim.so \
+            gh release upload "$TAG" \
+              dist/usbredirect-aarch64 dist/usbredirect-armv7a \
+              dist/opx-usb-shim-aarch64.so dist/opx-usb-shim-armv7a.so dist/opx-usb-shim.so \
               dist/opx-mg-ubuntu-arm64.qcow2 dist/seed.iso dist/opx-mg-${VERSION}.tar.gz \
               dist/checksums.txt --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
             gh release create "$TAG" \
-              dist/usbredirect-aarch64 dist/opx-usb-shim.so \
+              dist/usbredirect-aarch64 dist/usbredirect-armv7a \
+              dist/opx-usb-shim-aarch64.so dist/opx-usb-shim-armv7a.so dist/opx-usb-shim.so \
               dist/opx-mg-ubuntu-arm64.qcow2 dist/seed.iso dist/opx-mg-${VERSION}.tar.gz \
               dist/checksums.txt \
               --repo "$GITHUB_REPOSITORY" \

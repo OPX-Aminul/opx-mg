@@ -29,10 +29,78 @@ OPX_REPO="${OPX_MG_REPO:-OPX-Aminul/opx-mg}"
 OPX_RELEASE_API="https://api.github.com/repos/${OPX_REPO}/releases/latest"
 OPX_RAW="https://raw.githubusercontent.com/${OPX_REPO}/main"
 
+# Host arch of the Termux userspace, not the kernel: a 32-bit Termux on a
+# 64-bit phone reports armv8l and must get the armv7a binaries.
+opx_detect_arch() {
+    _opx_arch=""
+    case "$(uname -m 2>/dev/null || echo unknown)" in
+        aarch64|arm64)                  _opx_arch=aarch64 ;;
+        armv7l|armv8l|armv7a|armv8a|arm) _opx_arch=armv7a ;;
+        x86_64|amd64)                   _opx_arch=x86_64 ;;
+        i?86)                           _opx_arch=i686 ;;
+    esac
+    if [ -z "$_opx_arch" ] && command -v getprop >/dev/null 2>&1; then
+        case "$(getprop ro.product.cpu.abi 2>/dev/null || true)" in
+            arm64-v8a)            _opx_arch=aarch64 ;;
+            armeabi-v7a|armeabi)  _opx_arch=armv7a ;;
+            x86_64)               _opx_arch=x86_64 ;;
+            x86)                  _opx_arch=i686 ;;
+        esac
+    fi
+    printf '%s' "${_opx_arch:-unknown}"
+}
+
+OPX_HOST_ARCH="${OPX_HOST_ARCH:-$(opx_detect_arch)}"
+export OPX_HOST_ARCH
+
+opx_arch_supported() {
+    case "$OPX_HOST_ARCH" in
+        aarch64|armv7a) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Guest disk arch. Override with OPX_GUEST_ARCH when pairing a custom QEMU
+# with an armhf guest; the stock arm64 image is used for both host arches.
+OPX_GUEST_ARCH="${OPX_GUEST_ARCH:-arm64}"
+
+opx_asset_candidates() {
+    # opx_asset_candidates usbredirect|shim|guest|seed
+    # Prints release asset names, newest naming first, then legacy aliases.
+    _opx_base=$1
+    case "$_opx_base" in
+        usbredirect)
+            printf '%s\n' "usbredirect-${OPX_HOST_ARCH}"
+            ;;
+        shim)
+            printf '%s\n' "opx-usb-shim-${OPX_HOST_ARCH}.so"
+            # Releases before 0.2 only shipped the aarch64 shim under this name.
+            [ "$OPX_HOST_ARCH" = aarch64 ] && printf '%s\n' "opx-usb-shim.so"
+            ;;
+        guest)
+            printf '%s\n' "opx-mg-ubuntu-${OPX_GUEST_ARCH}.qcow2"
+            ;;
+        seed)
+            printf '%s\n' "seed.iso"
+            ;;
+        *)
+            printf '%s\n' "$_opx_base"
+            ;;
+    esac
+}
+
 OPX_USBREDIR_PORT_BASE="${OPX_USBREDIR_PORT_BASE:-23456}"
 OPX_SSH_PORT="${OPX_SSH_PORT:-2222}"
-OPX_MEM="${OPX_MEM:-2048}"
-OPX_SMP="${OPX_SMP:-4}"
+# Both arches boot the arm64 guest; override for a custom 32-bit QEMU build.
+OPX_QEMU_BIN="${OPX_QEMU_BIN:-qemu-system-aarch64}"
+# 32-bit hosts have a small address space; TCG + a 2G guest is not viable.
+if [ "$OPX_HOST_ARCH" = armv7a ]; then
+    : "${OPX_MEM:=1024}"
+    : "${OPX_SMP:=2}"
+else
+    : "${OPX_MEM:=2048}"
+    : "${OPX_SMP:=4}"
+fi
 OPX_WATCH_INTERVAL="${OPX_WATCH_INTERVAL:-3}"
 
 opx_mkdirs() {
@@ -77,28 +145,28 @@ if isinstance(d, list):
 
 opx_download() {
     # opx_download URL DEST
-    url=$1 dest=$2
-    tmp="${dest}.part"
-    mkdir -p "$(dirname "$dest")"
+    _dl_url=$1 _dl_dest=$2
+    _dl_tmp="${_dl_dest}.part"
+    mkdir -p "$(dirname "$_dl_dest")"
     if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 3 --retry-delay 2 -o "$tmp" "$url" || {
-            rm -f "$tmp"
+        curl -fL --retry 3 --retry-delay 2 -o "$_dl_tmp" "$_dl_url" || {
+            rm -f "$_dl_tmp"
             return 1
         }
     elif command -v wget >/dev/null 2>&1; then
-        wget -O "$tmp" "$url" || {
-            rm -f "$tmp"
+        wget -O "$_dl_tmp" "$_dl_url" || {
+            rm -f "$_dl_tmp"
             return 1
         }
     else
         die "need curl or wget"
     fi
-    mv "$tmp" "$dest"
+    mv "$_dl_tmp" "$_dl_dest"
 }
 
 opx_github_asset_url() {
     # opx_github_asset_url NAME  -> prints browser_download_url
-    name=$1
+    _asset_name=$1
     if command -v python3 >/dev/null 2>&1; then
         curl -fsSL "$OPX_RELEASE_API" | python3 -c "
 import json,sys
@@ -112,7 +180,7 @@ for a in d.get('assets') or []:
         print(a.get('browser_download_url',''))
         sys.exit(0)
 sys.exit(1)
-" "$name"
+" "$_asset_name"
         return
     fi
     return 1

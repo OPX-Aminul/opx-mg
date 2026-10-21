@@ -2,7 +2,7 @@
 # QEMU start / stop / console / ssh.
 
 opx_qemu_bin() {
-    command -v qemu-system-aarch64
+    command -v "${OPX_QEMU_BIN:-qemu-system-aarch64}"
 }
 
 opx_cmd_start() {
@@ -13,7 +13,7 @@ opx_cmd_start() {
     fi
     [ -f "$OPX_IMAGES/disk.qcow2" ] || die "no guest disk — run: opx-mg setup"
     [ -e "$OPX_IMAGES/edk2-aarch64-code.fd" ] || die "no UEFI firmware — pkg install qemu-system-aarch64-headless"
-    qemu=$(opx_qemu_bin) || die "qemu-system-aarch64 not on PATH"
+    qemu=$(opx_qemu_bin) || die "${OPX_QEMU_BIN} not on PATH (set OPX_QEMU_BIN)"
     seed_args=""
     if [ -s "$OPX_IMAGES/seed.iso" ]; then
         seed_args="-drive file=${OPX_IMAGES}/seed.iso,format=raw,if=virtio,readonly=on"

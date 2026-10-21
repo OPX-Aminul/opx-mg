@@ -23,10 +23,21 @@ EOF
 }
 
 opx_check_qemu() {
-    if command -v qemu-system-aarch64 >/dev/null 2>&1; then
+    if command -v "$OPX_QEMU_BIN" >/dev/null 2>&1; then
         return 0
     fi
-    warn "qemu-system-aarch64 missing"
+    warn "$OPX_QEMU_BIN missing"
+    if [ "$OPX_HOST_ARCH" = armv7a ]; then
+        cat >&2 <<'EOF'
+32-bit Termux (arm) has no QEMU package, so the guest VM cannot start here.
+Options:
+  - run 64-bit (aarch64) Termux on a 64-bit device, or
+  - build/install a 32-bit QEMU and set OPX_QEMU_BIN=/path/to/qemu-system-aarch64
+
+The USB side (usbredirect-armv7a + shim) is still installed.
+EOF
+        return 1
+    fi
     cat >&2 <<'EOF'
 On Termux:
 
@@ -77,38 +88,57 @@ opx_build_seed() {
 }
 
 opx_fetch_asset() {
-    name=$1 dest=$2
-    force=${3:-0}
-    if [ -f "$dest" ] && [ "$force" != "1" ]; then
-        info "already have $name"
+    _asset_name=$1 _asset_dest=$2 _asset_force=${3:-0}
+    if [ -f "$_asset_dest" ] && [ "$_asset_force" != "1" ]; then
+        info "already have $_asset_name"
         return 0
     fi
-    url=$(opx_github_asset_url "$name" 2>/dev/null || true)
-    if [ -z "$url" ]; then
-        warn "release asset $name not published yet"
+    _asset_url=$(opx_github_asset_url "$_asset_name" 2>/dev/null || true)
+    if [ -z "$_asset_url" ]; then
+        warn "release asset $_asset_name not published yet"
         return 1
     fi
-    info "downloading $name"
-    opx_download "$url" "$dest"
+    info "downloading $_asset_name"
+    opx_download "$_asset_url" "$_asset_dest"
+}
+
+opx_fetch_asset_any() {
+    # opx_fetch_asset_any DEST BASE [FORCE] — arch-specific names, then aliases
+    _any_dest=$1 _any_base=$2 _any_force=${3:-0}
+    for _any_name in $(opx_asset_candidates "$_any_base"); do
+        if opx_fetch_asset "$_any_name" "$_any_dest" "$_any_force"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+opx_installed_arch() {
+    cat "$OPX_BIN/arch" 2>/dev/null || true
 }
 
 opx_install_usbredirect() {
-    dest=$OPX_BIN/usbredirect
-    if [ -x "$dest" ]; then
+    _ur_dest=$OPX_BIN/usbredirect
+    _ur_have=$(opx_installed_arch)
+    if [ -x "$_ur_dest" ] && [ "$_ur_have" = "$OPX_HOST_ARCH" ]; then
         return 0
     fi
     if [ -x "$OPX_ROOT/host/usbredirect" ]; then
-        cp "$OPX_ROOT/host/usbredirect" "$dest"
-        chmod +x "$dest"
+        cp "$OPX_ROOT/host/usbredirect" "$_ur_dest"
+        chmod +x "$_ur_dest"
+        printf '%s\n' "$OPX_HOST_ARCH" > "$OPX_BIN/arch"
         return 0
     fi
-    opx_fetch_asset "opx-usb-shim.so" "$OPX_BIN/opx-usb-shim.so" || true
-    if opx_fetch_asset "usbredirect-aarch64" "$dest"; then
-        chmod +x "$dest"
+    # Arch changed or unknown: force a fresh download.
+    opx_fetch_asset_any "$OPX_BIN/opx-usb-shim.so" shim 1 || true
+    if opx_fetch_asset_any "$_ur_dest" usbredirect 1; then
+        chmod +x "$_ur_dest"
+        printf '%s\n' "$OPX_HOST_ARCH" > "$OPX_BIN/arch"
         return 0
     fi
     if command -v usbredirect >/dev/null 2>&1; then
-        ln -sf "$(command -v usbredirect)" "$dest"
+        ln -sf "$(command -v usbredirect)" "$_ur_dest"
+        printf '%s\n' "$OPX_HOST_ARCH" > "$OPX_BIN/arch"
         return 0
     fi
     warn "usbredirect binary not found — compile from spice/usbredir or wait for a release asset"
@@ -124,25 +154,25 @@ EOF
 }
 
 opx_fetch_disk() {
-    disk=$OPX_IMAGES/disk.qcow2
-    if [ -f "$disk" ]; then
+    _disk=$OPX_IMAGES/disk.qcow2
+    if [ -f "$_disk" ]; then
         info "guest disk already present"
         return 0
     fi
-    if opx_fetch_asset "opx-mg-ubuntu-arm64.qcow2" "$disk"; then
+    if opx_fetch_asset_any "$_disk" guest; then
         return 0
     fi
     warn "prebaked guest image not in releases — falling back to Ubuntu cloud image (first boot installs firmware, needs network)"
-    cloud=$OPX_IMAGES/ubuntu-24.04-server-cloudimg-arm64.img
-    url="https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img"
-    if [ ! -f "$cloud" ]; then
+    _cloud=$OPX_IMAGES/ubuntu-24.04-server-cloudimg-${OPX_GUEST_ARCH}.img
+    _cloud_url="https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-${OPX_GUEST_ARCH}.img"
+    if [ ! -f "$_cloud" ]; then
         info "downloading Ubuntu 24.04 cloud image (~600MB)"
-        opx_download "$url" "$cloud" || die "cloud image download failed"
+        opx_download "$_cloud_url" "$_cloud" || die "cloud image download failed"
     fi
     opx_need qemu-img
     info "converting to qcow2 and growing to 10G"
-    qemu-img convert -O qcow2 "$cloud" "$disk"
-    qemu-img resize "$disk" 10G
+    qemu-img convert -O qcow2 "$_cloud" "$_disk"
+    qemu-img resize "$_disk" 10G
 }
 
 opx_link_cli() {
@@ -159,8 +189,15 @@ opx_link_cli() {
 
 opx_cmd_setup() {
     opx_mkdirs
-    info "opx-mg ${OPX_MG_VERSION} setup"
+    info "opx-mg ${OPX_MG_VERSION} setup (host ${OPX_HOST_ARCH}, guest ${OPX_GUEST_ARCH})"
     ok=0
+    if ! opx_arch_supported; then
+        warn "unsupported host arch '${OPX_HOST_ARCH}' — only aarch64 and armv7a release binaries are published"
+        ok=1
+    fi
+    if [ "$OPX_HOST_ARCH" = armv7a ]; then
+        info "32-bit host: QEMU runs the arm64 guest in TCG (slow); mem=${OPX_MEM} smp=${OPX_SMP}"
+    fi
     if opx_is_termux; then
         opx_check_termux_api || ok=1
     else
@@ -189,9 +226,10 @@ opx_cmd_setup() {
 opx_cmd_doctor() {
     printf 'opx-mg %s\n' "$OPX_MG_VERSION"
     printf 'home     %s\n' "$OPX_HOME"
+    printf 'arch     %s (guest %s)\n' "$OPX_HOST_ARCH" "$OPX_GUEST_ARCH"
     printf 'termux   %s\n' "$(opx_is_termux && echo yes || echo no)"
     printf 'termux-usb  %s\n' "$(command -v termux-usb 2>/dev/null || echo MISSING)"
-    printf 'qemu     %s\n' "$(command -v qemu-system-aarch64 2>/dev/null || echo MISSING)"
+    printf 'qemu     %s\n' "$(command -v "$OPX_QEMU_BIN" 2>/dev/null || echo MISSING)"
     printf 'qemu-img %s\n' "$(command -v qemu-img 2>/dev/null || echo MISSING)"
     printf 'python3  %s\n' "$(command -v python3 2>/dev/null || echo MISSING)"
     printf 'usbredirect %s\n' "$([ -x "$OPX_BIN/usbredirect" ] && echo "$OPX_BIN/usbredirect" || echo MISSING)"
