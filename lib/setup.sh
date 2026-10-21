@@ -22,19 +22,46 @@ EOF
     return 0
 }
 
+opx_termux_pkg_install() {
+    command -v pkg >/dev/null 2>&1 || return 1
+    info "pkg install -y $*"
+    pkg install -y "$@"
+}
+
+opx_install_qemu() {
+    # Auto-install QEMU inside Termux unless OPX_NO_INSTALL=1.
+    [ "${OPX_NO_INSTALL:-0}" = "1" ] && return 1
+    opx_is_termux || return 1
+    if [ "$OPX_HOST_ARCH" = armv7a ]; then
+        # 32-bit Termux has no QEMU in termux-main; TUR builds it (arm).
+        info "32-bit Termux: QEMU comes from the TUR repo"
+        opx_termux_pkg_install tur-repo || return 1
+        opx_termux_pkg_install qemu-system-aarch64-9 qemu-utils-10 || return 1
+    else
+        opx_termux_pkg_install qemu-system-aarch64-headless qemu-utils || return 1
+    fi
+    command -v "$OPX_QEMU_BIN" >/dev/null 2>&1
+}
+
 opx_check_qemu() {
     if command -v "$OPX_QEMU_BIN" >/dev/null 2>&1; then
+        return 0
+    fi
+    if opx_install_qemu; then
+        info "QEMU ready: $(command -v "$OPX_QEMU_BIN")"
         return 0
     fi
     warn "$OPX_QEMU_BIN missing"
     if [ "$OPX_HOST_ARCH" = armv7a ]; then
         cat >&2 <<'EOF'
-32-bit Termux (arm) has no QEMU package, so the guest VM cannot start here.
-Options:
-  - run 64-bit (aarch64) Termux on a 64-bit device, or
-  - build/install a 32-bit QEMU and set OPX_QEMU_BIN=/path/to/qemu-system-aarch64
+32-bit Termux gets QEMU from the TUR repo:
 
-The USB side (usbredirect-armv7a + shim) is still installed.
+  pkg install tur-repo
+  pkg install qemu-system-aarch64-9 qemu-utils-10
+
+That package provides the qemu-system-aarch64 binary and ships
+edk2-aarch64-code.fd. Automatic install is skipped when OPX_NO_INSTALL=1;
+use OPX_QEMU_BIN to point at a different QEMU.
 EOF
         return 1
     fi
