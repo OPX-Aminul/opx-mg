@@ -4,6 +4,60 @@ Rootless USB Wi-Fi on stock Android, inside Termux. No custom phone kernel.
 No Magisk. No NetHunter flash. The phone kernel never sees the dongle as a
 Wi-Fi NIC — Android only hands over a USB file descriptor.
 
+## Flow
+
+Host architecture is detected at `setup`/`update` time (not build time) from
+the running Termux userspace, so the matching binaries are always chosen.
+
+```mermaid
+flowchart TB
+    subgraph GitHub["GitHub Releases"]
+        R1["usbredirect-aarch64"]
+        R2["usbredirect-armv7a"]
+        S1["opx-usb-shim-aarch64.so"]
+        S2["opx-usb-shim-armv7a.so"]
+        D["opx-mg-ubuntu-arm64.qcow2 + seed.iso"]
+    end
+
+    subgraph Detect["opx-mg detect (opx_detect_arch)"]
+        U["uname -m / getprop"]
+        C{"aarch64 or<br>armv7a?"}
+    end
+
+    subgraph Install["setup / update"]
+        B1["select aarch64 assets"]
+        B2["select armv7a assets"]
+        L["link opx-mg CLI"]
+    end
+
+    subgraph Run["Termux userspace"]
+        T["Termux + termux-usb<br>(rootless, non-root)"]
+        UB["usbredirect-<arch>"]
+    end
+
+    subgraph Guest["QEMU guest (arm64 Linux)"]
+        Q["qemu-system-aarch64<br>+ usb-redir"]
+        G["guest kernel: real<br>USB drivers + firmware"]
+    end
+
+    U --> C
+    C -->|"aarch64 64-bit"| B1
+    C -->|"armv7a 32-bit"| B2
+    B1 -->|"download"| R1
+    B1 -->|"download"| S1
+    B2 -->|"download"| R2
+    B2 -->|"download"| S2
+    B1 -->|"always"| D
+    B2 -->|"always"| D
+    B1 --> L
+    B2 --> L
+    T --> T1["termux-usb -E -e<br>TERMUX_USB_FD"]
+    T1 --> UB
+    UB -->|"TCP 127.0.0.1:PORT"| Q
+    Q --> G
+    G --> W["wlan0 on guest"]
+```
+
 ```
 USB dongle
     |
