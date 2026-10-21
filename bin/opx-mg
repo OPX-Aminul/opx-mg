@@ -18,6 +18,7 @@ export OPX_ROOT
 . "$OPX_ROOT/lib/usb.sh"
 . "$OPX_ROOT/lib/watch.sh"
 . "$OPX_ROOT/lib/update.sh"
+. "$OPX_ROOT/lib/logs.sh"
 
 usage() {
     cat <<EOF
@@ -36,6 +37,9 @@ Usage:
   opx-mg usb detach DEV
   opx-mg watch           attach every newly plugged USB device
   opx-mg doctor          dependencies, arch, VM and USB state
+  opx-mg logs            show the last 200 log lines
+  opx-mg logs path       print the log file path
+  opx-mg logs bundle     package logs + system info for sharing
   opx-mg -u | update     download latest release binaries + CLI
   opx-mg update --image  also replace the guest disk
 
@@ -68,6 +72,9 @@ if [ $# -gt 0 ]; then
     shift
 fi
 
+opx_log_session_start "opx-mg ${cmd:-default} $*"
+trap opx_log_session_end EXIT
+
 case "$cmd" in
     "" )        opx_cmd_default ;;
     setup)      opx_cmd_setup ;;
@@ -79,6 +86,7 @@ case "$cmd" in
     usb)        opx_cmd_usb "$@" ;;
     watch)      opx_cmd_watch ;;
     doctor)     opx_cmd_doctor ;;
+    logs|log)   opx_cmd_logs "$@" ;;
     -u|u|update|--update) opx_cmd_update "$@" ;;
     -h|--help|help) usage ;;
     -v|--version|version) printf '%s\n' "$OPX_MG_VERSION" ;;

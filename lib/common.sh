@@ -23,7 +23,12 @@ OPX_BIN="$OPX_HOME/bin"
 OPX_IMAGES="$OPX_HOME/images"
 OPX_RUN="$OPX_HOME/run"
 OPX_STATE="$OPX_HOME/state"
-OPX_LOG="$OPX_RUN/opx-mg.log"
+OPX_LOGS="$OPX_HOME/logs"
+# One persistent file with setup, VM, USB and guest serial output. Rotation
+# only happens at session start while the VM is down, so a running QEMU never
+# loses the file it is appending to.
+OPX_LOG="$OPX_LOGS/opx-mg.log"
+OPX_LOG_MAX_BYTES="${OPX_LOG_MAX_BYTES:-2097152}"
 
 OPX_REPO="${OPX_MG_REPO:-OPX-Aminul/opx-mg}"
 OPX_RELEASE_API="https://api.github.com/repos/${OPX_REPO}/releases/latest"
@@ -104,14 +109,53 @@ fi
 OPX_WATCH_INTERVAL="${OPX_WATCH_INTERVAL:-3}"
 
 opx_mkdirs() {
-    mkdir -p "$OPX_BIN" "$OPX_IMAGES" "$OPX_RUN" "$OPX_STATE"
+    mkdir -p "$OPX_BIN" "$OPX_IMAGES" "$OPX_RUN" "$OPX_STATE" "$OPX_LOGS"
 }
 
 opx_ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+opx_log_rotate() {
+    [ -f "$OPX_LOG" ] || return 0
+    opx_qemu_running && return 0
+    _size=$(wc -c < "$OPX_LOG" 2>/dev/null || echo 0)
+    [ "${_size:-0}" -gt "$OPX_LOG_MAX_BYTES" ] || return 0
+    _rot="$OPX_LOG.$(date +%Y%m%d-%H%M%S)"
+    mv "$OPX_LOG" "$_rot" 2>/dev/null || return 0
+    opx_log INFO "log rotated: $_rot"
+}
+
 opx_log() {
     opx_mkdirs
     printf '%s [%s] %s\n' "$(opx_ts)" "$1" "$2" | tee -a "$OPX_LOG" >&2
+}
+
+opx_log_session_start() {
+    opx_mkdirs
+    opx_log_rotate
+    opx_log INFO "=== start: ${1:-opx-mg} | version $OPX_MG_VERSION | arch $OPX_HOST_ARCH | guest $OPX_GUEST_ARCH | termux $(opx_is_termux && echo yes || echo no) | cwd $(pwd)"
+}
+
+opx_log_session_end() {
+    _rc=$?
+    opx_log INFO "=== end: exit $_rc"
+    return "$_rc"
+}
+
+# opx_run COMMAND [ARGS...] — stream output to the terminal, append it to the
+# single log file, and return the command's real exit status (POSIX sh has no
+# pipefail, so the status is carried out of the pipeline in a file).
+opx_run() {
+    opx_log INFO "exec: $*"
+    _opx_rc_file="$OPX_RUN/.opx-rc"
+    mkdir -p "$OPX_RUN"
+    : > "$_opx_rc_file"
+    { { if "$@" 2>&1; then printf '0' > "$_opx_rc_file"; else printf '%s' "$?" > "$_opx_rc_file"; fi; } | tee -a "$OPX_LOG" >&2; }
+    _opx_rc=$(cat "$_opx_rc_file" 2>/dev/null || true)
+    [ -n "$_opx_rc" ] || _opx_rc=1
+    if [ "$_opx_rc" -ne 0 ]; then
+        opx_log WARN "exec failed ($_opx_rc): $*"
+    fi
+    return "$_opx_rc"
 }
 
 info() { opx_log INFO "$*"; }
@@ -148,20 +192,25 @@ opx_download() {
     _dl_url=$1 _dl_dest=$2
     _dl_tmp="${_dl_dest}.part"
     mkdir -p "$(dirname "$_dl_dest")"
+    opx_log INFO "download: $_dl_url -> $_dl_dest"
     if command -v curl >/dev/null 2>&1; then
         curl -fL --retry 3 --retry-delay 2 -o "$_dl_tmp" "$_dl_url" || {
             rm -f "$_dl_tmp"
+            opx_log WARN "download failed: $_dl_url"
             return 1
         }
     elif command -v wget >/dev/null 2>&1; then
         wget -O "$_dl_tmp" "$_dl_url" || {
             rm -f "$_dl_tmp"
+            opx_log WARN "download failed: $_dl_url"
             return 1
         }
     else
         die "need curl or wget"
     fi
     mv "$_dl_tmp" "$_dl_dest"
+    _dl_size=$(wc -c < "$_dl_dest" 2>/dev/null || echo 0)
+    opx_log INFO "downloaded: $_dl_dest (${_dl_size} bytes)"
 }
 
 opx_github_asset_url() {

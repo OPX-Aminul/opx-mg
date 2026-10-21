@@ -118,8 +118,27 @@ opx-mg usb attach /dev/bus/usb/001/002
 opx-mg console
 opx-mg stop
 opx-mg doctor
+opx-mg logs
 opx-mg -u
 ```
+
+### Logs
+
+Everything from setup to USB passthrough is appended to one file:
+`${OPX_MG_HOME:-$PREFIX/var/lib/opx-mg}/logs/opx-mg.log`. That includes
+`pkg install` and download output, VM start/stop, USB permission and
+usbredirect messages, and the guest serial console. The path is
+`~/.opx-mg/logs/opx-mg.log` outside Termux.
+
+```
+opx-mg logs path
+opx-mg logs            # last 200 lines
+opx-mg logs system     # arch, QEMU, termux-usb, attached devices
+opx-mg logs bundle     # tar.gz with logs/ + system-info.txt, for sharing
+```
+
+The log rotates to `opx-mg.log.<timestamp>` at CLI start when it exceeds
+2 MB and the VM is stopped (`OPX_LOG_MAX_BYTES` overrides the size).
 
 `opx-mg doctor` prints the detected arch, QEMU path, guest disk, seed, and
 USB state. `opx-mg -u` (or `opx-mg update`) pulls the newest release: CLI
@@ -154,11 +173,88 @@ Login: `opx` / `opx` (root password `opx`).
   bug. See `docs/XIAOMI.md`. A guest `hub.c` quirk is planned.
 - Internal phone Wi-Fi is never touched.
 
+## Troubleshooting
+
+Everything that happens on the phone is written to one file. Start here:
+
+```
+# current state: arch, QEMU, termux-usb, disk, attached devices, log path
+opx-mg doctor
+
+# last 200 lines, including setup, VM, USB and guest serial output
+opx-mg logs
+
+# follow it live while plugging the adapter in
+opx-mg console
+```
+
+If you need help, send the bundle: it contains `opx-mg.log` and
+`system-info.txt`, not your GitHub token or Wi-Fi credentials.
+
+```
+opx-mg logs bundle
+```
+
+### Setup stops or downloads fail
+
+- The log shows every URL and its byte count; a failed download appears as
+  `[WARN] download failed:` followed by the URL. Re-run `opx-mg setup`.
+- `release asset ... not published yet` means that file is missing from the
+  latest GitHub release. The guest disk falls back to the Ubuntu cloud
+  image; `usbredirect` cannot fall back.
+- `termux-usb missing` or `termux-usb -l failed` means the Termux:API APK
+  is absent or signed by a different key. Install the APK from the same
+  source as Termux.
+- `edk2-aarch64-code.fd not found` means the QEMU package is incomplete:
+  `pkg install qemu-system-aarch64-headless`.
+- On 32-bit Termux QEMU is not available in the stock repo (see
+  [Architectures](#architectures)); set `OPX_QEMU_BIN`.
+
+### The VM does not boot
+
+```
+opx-mg logs | grep -iE 'qemu|error|firmware|panic'
+opx-mg console
+```
+
+`QEMU failed to start` means the binary exited immediately. The log records
+the failure and the disk/seed paths; QEMU's own message is printed on the
+terminal. A guest that starts but never reaches SSH is still visible on
+`opx-mg console` (kernel and cloud-init messages). Confirm the disk exists
+with `opx-mg doctor`.
+
+### USB attach hangs or fails
+
+- The Android permission dialog must be accepted; the log records
+  `waiting for USB permission dialog`. If nothing appears, the Termux:API
+  app is missing or from another source.
+- `usbredirect did not bind 127.0.0.1:<port>`: the wrapper could not open
+  the inherited fd, or the port is taken. The log has the wrapper's own
+  lines tagged `[USB]`.
+- `QMP hotplug failed`: the VM is up but QEMU rejected the device. Re-run
+  `opx-mg usb attach /dev/bus/usb/BBB/DDD`; one `usbredirect` runs per
+  device, so detach it first if it is listed twice.
+- `opx-mg usb status` shows the raw device list and the attached map.
+
+### The adapter is attached but the guest has no wlan0
+
+Inside the guest:
+
+```
+lsusb
+dmesg | grep -iE 'usb|wlan|firmware|ath9k|rtl|mt7'
+ip link
+```
+
+Missing firmware or a driver that failed to probe is recorded there and in
+the same log file. Xiaomi/MIUI full-speed dongles reported as low-speed are
+covered in `docs/XIAOMI.md`.
+
 ## Layout
 
 ```
 bin/opx-mg            CLI
-lib/                  setup, vm, usb, watch
+lib/                  setup, vm, usb, watch, logs
 host/                 usbredirect build notes + optional fd shim
 guest/                cloud-init seed + image bake script
 docs/ARCHITECTURE.md  design

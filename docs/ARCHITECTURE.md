@@ -103,6 +103,7 @@ opx-mg                 user-facing CLI (this repo, POSIX sh)
   lib/vm.sh            start/stop QEMU, QMP helper
   lib/usb.sh           list / request / usbredirect / QMP hotplug
   lib/watch.sh         poll termux-usb -l, attach on connect
+  lib/logs.sh          diagnostic log viewer + shareable bundle
   host/usbredirect     prebuilt aarch64/armv7a usbredir tool (release asset)
   host/opx-usb-shim.c  optional: wrap TERMUX_USB_FD as a libusb device
   guest/cloud-init/    seed ISO: firmware, modules, ssh, motd
@@ -116,9 +117,25 @@ Runtime state lives under `$PREFIX/var/lib/opx-mg` (or `~/.opx-mg` if
 $PREFIX/var/lib/opx-mg/
   bin/                 usbredirect, qemu wrapper helpers
   images/              disk.qcow2, seed.iso, edk2-aarch64-code.fd
-  run/                 qemu.pid, qmp.sock, usbredir.pid, usbredir.log
+  run/                 qemu.pid, qmp.sock, usbredir.pid, transient rc file
   state/               last-seen devices, attached map
+  logs/                opx-mg.log (single diagnostic log), system-info.txt
 ```
+
+## Logging
+
+One append-only file, `logs/opx-mg.log`, records the whole lifecycle:
+installer and setup steps (including `pkg install` and download output),
+every CLI invocation with arch/cwd and exit code, QEMU start/stop, USB
+permission and usbredirect messages, and the guest serial console (QEMU
+appends through a file chardev). usbredirect and the wrapper write to the
+same file.
+
+`opx-mg logs` tails it, `opx-mg logs system` writes `system-info.txt`, and
+`opx-mg logs bundle` produces a tar.gz with both for sharing. Rotation is
+rename-only: at CLI start, when the file exceeds `OPX_LOG_MAX_BYTES`
+(default 2 MB) and the VM is stopped, it becomes `opx-mg.log.<timestamp>`.
+A running QEMU keeps its open file, so no output is split mid-session.
 
 ## USB attach (the only hard part)
 

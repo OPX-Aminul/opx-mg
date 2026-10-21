@@ -19,7 +19,10 @@ opx_cmd_start() {
         seed_args="-drive file=${OPX_IMAGES}/seed.iso,format=raw,if=virtio,readonly=on"
     fi
     info "starting QEMU mem=${OPX_MEM} smp=${OPX_SMP} ssh=127.0.0.1:${OPX_SSH_PORT}"
-    # Background: serial goes to a log; user attaches with `opx-mg console`.
+    info "qemu: $qemu"
+    info "disk: ${OPX_IMAGES}/disk.qcow2"
+    info "guest serial appended to $OPX_LOG"
+    # Background: serial is appended to the shared log; attach with `opx-mg console`.
     # shellcheck disable=SC2086
     "$qemu" \
         -machine virt,gic-version=3 \
@@ -35,10 +38,11 @@ opx_cmd_start() {
         -device qemu-xhci,id=xhci,p2=8,p3=8 \
         -qmp "unix:${OPX_RUN}/qmp.sock,server,wait=off" \
         -pidfile "$OPX_RUN/qemu.pid" \
-        -serial "file:${OPX_RUN}/console.log" \
+        -chardev "file,id=serial0,path=${OPX_LOG},append=on" \
+        -serial chardev:serial0 \
         -monitor "unix:${OPX_RUN}/monitor.sock,server,wait=off" \
         -daemonize \
-        || die "QEMU failed to start — see $OPX_RUN/console.log"
+        || die "QEMU failed to start — see $OPX_LOG"
     info "QEMU up pid $(cat "$OPX_RUN/qemu.pid")"
     info "console: opx-mg console     ssh: opx-mg ssh"
 }
@@ -71,9 +75,9 @@ opx_cmd_stop() {
 
 opx_cmd_console() {
     opx_qemu_running || die "QEMU is not running"
-    # Follow the serial log. Ctrl-C returns to Termux, VM keeps running.
-    info "serial log (Ctrl-C to detach, VM stays up)"
-    exec tail -f "$OPX_RUN/console.log"
+    # Follow the shared log. Ctrl-C returns to Termux, VM keeps running.
+    info "log: $OPX_LOG (Ctrl-C to detach, VM stays up)"
+    exec tail -f "$OPX_LOG"
 }
 
 opx_cmd_ssh() {

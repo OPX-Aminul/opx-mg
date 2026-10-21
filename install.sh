@@ -17,7 +17,11 @@ fi
 DEST="${PREFIX}/lib/opx-mg"
 BIN="${PREFIX}/bin/opx-mg"
 TMP="${PREFIX}/tmp/opx-mg-install"
-mkdir -p "$DEST" "${PREFIX}/bin" "$TMP"
+LOGDIR="${OPX_MG_HOME:-$PREFIX/var/lib/opx-mg}/logs"
+LOG="$LOGDIR/opx-mg.log"
+mkdir -p "$DEST" "${PREFIX}/bin" "$TMP" "$LOGDIR"
+log() { printf '%s [INSTALL] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG" >&2; }
+log "installer start: repo=$REPO branch=$BRANCH dest=$DEST"
 
 detect_arch() {
     case "$(uname -m 2>/dev/null || echo unknown)" in
@@ -30,6 +34,7 @@ detect_arch() {
 }
 
 ARCH=$(detect_arch)
+log "host arch: $ARCH"
 case "$ARCH" in
     aarch64|armv7a) ;;
     *) echo "opx-mg: warning: unsupported host arch '$ARCH' (releases ship aarch64 and armv7a)" >&2 ;;
@@ -73,6 +78,7 @@ PY
 ) || true
         fi
         if [ -n "$tarball_url" ]; then
+            log "using release tarball v${tag}"
             archive="$TMP/opx-mg-${tag}.tar.gz"
             download "$tarball_url" "$archive"
             tar -xzf "$archive" -C "$DEST"
@@ -82,6 +88,7 @@ PY
 fi
 
 if [ "$installed" -ne 1 ]; then
+    log "no release tarball yet, cloning ${BRANCH}"
     echo "opx-mg: no release tarball yet, cloning ${BRANCH}"
     TARBALL="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
     archive="$TMP/src.tar.gz"
@@ -97,6 +104,7 @@ fi
 
 chmod +x "$DEST/bin/opx-mg" "$DEST/install.sh" 2>/dev/null || true
 ln -sf "$DEST/bin/opx-mg" "$BIN"
+log "installer linked $BIN; running setup"
 echo "opx-mg: linked $BIN"
 echo "opx-mg: running setup (pulls usbredirect + guest disk from Releases)"
 "$BIN" setup || true

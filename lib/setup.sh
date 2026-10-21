@@ -24,8 +24,7 @@ EOF
 
 opx_termux_pkg_install() {
     command -v pkg >/dev/null 2>&1 || return 1
-    info "pkg install -y $*"
-    pkg install -y "$@"
+    opx_run pkg install -y "$@"
 }
 
 opx_install_qemu() {
@@ -240,8 +239,11 @@ opx_cmd_setup() {
         ok=1
     fi
     opx_install_usbredirect || ok=1
+    info "preparing cloud-init seed"
     opx_fetch_asset "seed.iso" "$OPX_IMAGES/seed.iso" || opx_build_seed
+    info "preparing guest disk"
     opx_fetch_disk || ok=1
+    info "linking CLI"
     opx_link_cli
     if [ "$ok" -ne 0 ]; then
         warn "setup finished with warnings — 'opx-mg doctor' for details"
@@ -264,6 +266,7 @@ opx_cmd_doctor() {
     printf 'seed     %s\n' "$([ -f "$OPX_IMAGES/seed.iso" ] && echo "$OPX_IMAGES/seed.iso" || echo MISSING)"
     printf 'edk2     %s\n' "$([ -e "$OPX_IMAGES/edk2-aarch64-code.fd" ] && echo ok || echo MISSING)"
     printf 'qemu up  %s\n' "$(opx_qemu_running && echo yes || echo no)"
+    printf 'log      %s\n' "$OPX_LOG"
     if command -v termux-usb >/dev/null 2>&1; then
         printf 'usb devices:\n'
         opx_termux_usb -l 2>/dev/null || printf '  (termux-usb -l failed)\n'

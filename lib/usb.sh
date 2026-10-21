@@ -36,19 +36,21 @@ LOG="${OPX_USB_LOG:-/dev/stderr}"
 BIN="${OPX_USBREDIRECT_BIN:?}"
 PORT="${OPX_USBREDIR_PORT:?}"
 FD="${TERMUX_USB_FD:-}"
+log() { printf '%s [USB] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 if [ -z "$FD" ]; then
-    echo "usbredirect-wrap: TERMUX_USB_FD is empty" >> "$LOG"
+    log "usbredirect-wrap: TERMUX_USB_FD is empty"
     exit 1
 fi
 DEVNODE="/proc/self/fd/${FD}"
-echo "usbredirect-wrap: fd=$FD node=$DEVNODE port=$PORT" >> "$LOG"
+log "usbredirect-wrap: fd=$FD node=$DEVNODE port=$PORT"
 # spice usbredirect accepts a usbfs path. The inherited fd is a usbfs
 # handle; /proc/self/fd/N is the portable way to name it without opening
 # /dev/bus/usb (which Android blocks).
 if [ -x "$BIN" ]; then
+    log "usbredirect-wrap: exec $BIN --device $DEVNODE --as 127.0.0.1:$PORT"
     exec "$BIN" --device "$DEVNODE" --as "127.0.0.1:${PORT}"
 fi
-echo "usbredirect-wrap: binary not executable: $BIN" >> "$LOG"
+log "usbredirect-wrap: binary not executable: $BIN"
 exit 1
 WRAP
     chmod +x "$wrap"
@@ -91,7 +93,6 @@ opx_cmd_usb_attach() {
     port=$(opx_usb_port_for "$dev")
     state=$OPX_STATE/attached-$id
     pidfile=$OPX_RUN/usbredir-$id.pid
-    logfile=$OPX_RUN/usbredir-$id.log
     if [ -f "$pidfile" ]; then
         old=$(cat "$pidfile")
         if kill -0 "$old" 2>/dev/null; then
@@ -99,21 +100,23 @@ opx_cmd_usb_attach() {
             return 0
         fi
     fi
-    info "permission + usbredirect for $dev -> 127.0.0.1:$port"
+    info "permission + usbredirect for $dev -> 127.0.0.1:$port (id $id)"
     wrap=$(opx_write_wrap)
     # Request permission first so the -e exec is not racing the dialog.
+    info "waiting for USB permission dialog"
     opx_termux_usb -r "$dev" >/dev/null 2>&1 || warn "permission request returned non-zero (continuing)"
     OPX_USBREDIRECT_BIN=$OPX_BIN/usbredirect
     OPX_USBREDIR_PORT=$port
-    OPX_USB_LOG=$logfile
+    OPX_USB_LOG=$OPX_LOG
     export OPX_USBREDIRECT_BIN OPX_USBREDIR_PORT OPX_USB_LOG
     # -E exports TERMUX_USB_FD; -e is the wrap script (single argv).
     # Run in background so opx-mg returns; usbredirect holds the fd.
     (
-        opx_termux_usb -E -e "$wrap" "$dev" >>"$logfile" 2>&1
+        opx_termux_usb -E -e "$wrap" "$dev" >>"$OPX_LOG" 2>&1
     ) &
     rpid=$!
     echo "$rpid" > "$pidfile"
+    info "usbredirect started pid $rpid, log -> $OPX_LOG"
     # Give usbredirect a moment to bind the TCP port.
     i=0
     ready=0
@@ -138,7 +141,7 @@ PY
         i=$((i + 1))
     done
     if [ "$ready" -ne 1 ]; then
-        warn "usbredirect did not bind 127.0.0.1:$port — see $logfile"
+        warn "usbredirect did not bind 127.0.0.1:$port — see $OPX_LOG"
         warn "if the log says the device path is invalid, the usbredirect build cannot open /proc/self/fd/N"
         return 1
     fi
