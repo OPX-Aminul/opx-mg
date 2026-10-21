@@ -1,6 +1,9 @@
 # shellcheck shell=sh
 # Shared paths, logging, download. Sourced by every opx-mg command.
 
+if [ -n "${OPX_ROOT:-}" ] && [ -f "$OPX_ROOT/VERSION" ]; then
+    OPX_MG_VERSION=$(tr -d ' \n' < "$OPX_ROOT/VERSION")
+fi
 : "${OPX_MG_VERSION:=0.1.0}"
 
 opx_detect_prefix() {

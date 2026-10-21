@@ -64,10 +64,11 @@ cd opx-mg
 ./bin/opx-mg setup
 ```
 
-`setup` downloads the guest disk and `usbredirect` from this repo's
-[Releases](https://github.com/OPX-Aminul/opx-mg/releases) when they exist.
-Until the first release is published it falls back to the Ubuntu 24.04
-cloud image (first boot then needs network to apt-get firmware).
+`setup` downloads `usbredirect-aarch64` and the guest disk from this
+repo's [Releases](https://github.com/OPX-Aminul/opx-mg/releases). A GitHub
+Actions workflow builds those assets on every `v*` tag and on
+`workflow_dispatch`. Until a release exists, setup falls back to the
+Ubuntu 24.04 cloud image.
 
 ## Use
 
@@ -100,7 +101,12 @@ opx-mg usb attach /dev/bus/usb/001/002
 opx-mg console
 opx-mg stop
 opx-mg doctor
+opx-mg -u
 ```
+
+`opx-mg -u` (or `opx-mg update`) pulls the newest release: CLI tarball,
+`usbredirect-aarch64`, shim, seed ISO. Add `--image` to replace the guest
+disk (stop the VM first).
 
 SSH is forwarded to `127.0.0.1:2222`.
 

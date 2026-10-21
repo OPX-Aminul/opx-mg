@@ -1,0 +1,115 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Version
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION=$(tr -d ' \n' < VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            wget curl ca-certificates xz-utils bzip2 git make autoconf automake libtool pkg-config \
+            qemu-utils xorriso file cloud-image-utils
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+          link-to-sdk: true
+
+      - name: Build usbredirect-aarch64
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          chmod +x host/build-android.sh
+          ./host/build-android.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Guest disk + seed ISO
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          chmod +x guest/build-image.sh
+          ./guest/build-image.sh "$GITHUB_WORKSPACE/dist/opx-mg-ubuntu-arm64.qcow2"
+          if [ -f /tmp/opx-mg-image/seed.iso ]; then
+            cp /tmp/opx-mg-image/seed.iso dist/seed.iso
+          else
+            xorriso -as mkisofs -V CIDATA -J -r -o dist/seed.iso \
+              guest/cloud-init/user-data guest/cloud-init/meta-data
+          fi
+
+      - name: Pack CLI
+        run: |
+          set -euo pipefail
+          VERSION=$(tr -d ' \n' < VERSION)
+          tar --exclude-vcs --exclude='.build' --exclude='dist' --exclude='*.qcow2' \
+            -czf "dist/opx-mg-${VERSION}.tar.gz" \
+            bin lib host guest docs patches install.sh README.md LICENSE VERSION THIRD-PARTY.md
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum usbredirect-aarch64 opx-usb-shim.so opx-mg-ubuntu-arm64.qcow2 seed.iso opx-mg-*.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          NOTES="opx-mg ${VERSION}
+
+          Assets for Termux aarch64:
+          - \`usbredirect-aarch64\` — usbredir server that wraps \`TERMUX_USB_FD\`
+          - \`opx-usb-shim.so\` — optional LD_PRELOAD open() shim
+          - \`opx-mg-ubuntu-arm64.qcow2\` — Ubuntu 24.04 guest disk
+          - \`seed.iso\` — cloud-init (user opx / password opx)
+          - \`opx-mg-${VERSION}.tar.gz\` — CLI + scripts
+
+          Install: \`curl -fsSL https://raw.githubusercontent.com/OPX-Aminul/opx-mg/main/install.sh | sh\`
+          Update: \`opx-mg -u\`
+          "
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/usbredirect-aarch64 dist/opx-usb-shim.so \
+              dist/opx-mg-ubuntu-arm64.qcow2 dist/seed.iso dist/opx-mg-${VERSION}.tar.gz \
+              dist/checksums.txt --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+          else
+            gh release create "$TAG" \
+              dist/usbredirect-aarch64 dist/opx-usb-shim.so \
+              dist/opx-mg-ubuntu-arm64.qcow2 dist/seed.iso dist/opx-mg-${VERSION}.tar.gz \
+              dist/checksums.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "opx-mg ${VERSION}" \
+              --notes "$NOTES" \
+              --target "${{ github.sha }}"
+          fi

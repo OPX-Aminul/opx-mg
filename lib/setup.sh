@@ -78,7 +78,8 @@ opx_build_seed() {
 
 opx_fetch_asset() {
     name=$1 dest=$2
-    if [ -f "$dest" ]; then
+    force=${3:-0}
+    if [ -f "$dest" ] && [ "$force" != "1" ]; then
         info "already have $name"
         return 0
     fi
@@ -101,6 +102,7 @@ opx_install_usbredirect() {
         chmod +x "$dest"
         return 0
     fi
+    opx_fetch_asset "opx-usb-shim.so" "$OPX_BIN/opx-usb-shim.so" || true
     if opx_fetch_asset "usbredirect-aarch64" "$dest"; then
         chmod +x "$dest"
         return 0
@@ -174,7 +176,7 @@ opx_cmd_setup() {
         ok=1
     fi
     opx_install_usbredirect || ok=1
-    opx_build_seed
+    opx_fetch_asset "seed.iso" "$OPX_IMAGES/seed.iso" || opx_build_seed
     opx_fetch_disk || ok=1
     opx_link_cli
     if [ "$ok" -ne 0 ]; then

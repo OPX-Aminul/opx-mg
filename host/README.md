@@ -7,8 +7,21 @@ Release assets expected:
 | `usbredirect-aarch64` | spice/usbredir `tools/usbredirect`, linked against Termux libusb |
 | `opx-usb-shim.so` | optional LD_PRELOAD so libusb opens `TERMUX_USB_FD` |
 
-Until those exist, `opx-mg setup` looks for `usbredirect` on PATH and
+`host/opx-usbredirect.c` is the release binary: it wraps `TERMUX_USB_FD`
+with `libusb_wrap_sys_device` and speaks usbredir on `127.0.0.1:PORT`.
+CI builds it with the NDK (`host/build-android.sh`).
+
+Until a release exists, `opx-mg setup` looks for `usbredirect` on PATH and
 prints compile instructions.
+
+## Cross-compile (desktop / GitHub Actions)
+
+```
+export ANDROID_NDK_HOME=/path/to/android-ndk-r27c
+./host/build-android.sh dist
+```
+
+Writes `dist/usbredirect-aarch64` and `dist/opx-usb-shim.so`.
 
 ## Build usbredirect on-device
 
