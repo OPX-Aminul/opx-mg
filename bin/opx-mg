@@ -1,0 +1,71 @@
+#!/usr/bin/env sh
+# opx-mg — rootless Termux USB passthrough into a QEMU Linux guest.
+set -eu
+
+self=$0
+case "$self" in
+    /*) ;;
+    *) self=$(command -v "$self" 2>/dev/null || printf '%s' "$self") ;;
+esac
+# Resolve the repo root (bin/opx-mg -> ..)
+OPX_ROOT=$(CDPATH= cd -- "$(dirname "$self")/.." && pwd)
+export OPX_ROOT
+
+# shellcheck disable=SC1091
+. "$OPX_ROOT/lib/common.sh"
+. "$OPX_ROOT/lib/setup.sh"
+. "$OPX_ROOT/lib/vm.sh"
+. "$OPX_ROOT/lib/usb.sh"
+. "$OPX_ROOT/lib/watch.sh"
+
+usage() {
+    cat <<EOF
+opx-mg ${OPX_MG_VERSION} — rootless USB Wi-Fi in Termux (stock Android kernel)
+
+Usage:
+  opx-mg                 setup (first run) then start VM + USB watcher
+  opx-mg setup           download guest image + usbredirect, link CLI
+  opx-mg start           boot the QEMU guest
+  opx-mg stop            stop the guest
+  opx-mg status          VM + attached USB
+  opx-mg console         follow guest serial
+  opx-mg ssh             ssh into the guest (opx / opx, port 2222)
+  opx-mg usb list        termux-usb -l
+  opx-mg usb attach DEV  permission + usbredirect + QMP usb-redir
+  opx-mg usb detach DEV
+  opx-mg watch           attach every newly plugged USB device
+  opx-mg doctor          dependency check
+
+Plug a USB Wi-Fi adapter after the VM is up. Tap OK on the Android
+permission dialog. In the guest: lsusb, ip link, iw dev.
+EOF
+}
+
+opx_cmd_default() {
+    if [ ! -f "$OPX_IMAGES/disk.qcow2" ] || [ ! -x "$OPX_BIN/usbredirect" ]; then
+        opx_cmd_setup || true
+    fi
+    opx_cmd_start
+    opx_cmd_watch
+}
+
+cmd=${1:-}
+if [ $# -gt 0 ]; then
+    shift
+fi
+
+case "$cmd" in
+    "" )        opx_cmd_default ;;
+    setup)      opx_cmd_setup ;;
+    start)      opx_cmd_start ;;
+    stop)       opx_cmd_stop ;;
+    status)     opx_cmd_status ;;
+    console)    opx_cmd_console ;;
+    ssh)        opx_cmd_ssh "$@" ;;
+    usb)        opx_cmd_usb "$@" ;;
+    watch)      opx_cmd_watch ;;
+    doctor)     opx_cmd_doctor ;;
+    -h|--help|help) usage ;;
+    -v|--version|version) printf '%s\n' "$OPX_MG_VERSION" ;;
+    *) die "unknown command: $cmd  (try: opx-mg --help)" ;;
+esac

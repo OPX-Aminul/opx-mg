@@ -1,0 +1,23 @@
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@
+-	} else {
+-		/* Initial guess is wrong and descriptor's value is invalid */
+-		dev_err(&udev->dev, "Invalid ep0 maxpacket: %d\n", maxp0);
+-		retval = -EMSGSIZE;
+-		goto fail;
+-	}
++	} else if (udev->speed == USB_SPEED_LOW && i == 64) {
++		/* Xiaomi/MIUI host stack bug: full-speed devices misreported
++		 * as low-speed. Accept maxpacket=64 and treat as full-speed
++		 * (low-speed maxpacket must be <=8 per USB spec).
++		 */
++		udev->speed = USB_SPEED_FULL;
++		udev->ep0.desc.wMaxPacketSize = cpu_to_le16(i);
++		usb_ep0_reinit(udev);
++	} else {
++		/* Initial guess is wrong and descriptor's value is invalid */
++		dev_err(&udev->dev, "Invalid ep0 maxpacket: %d\n", maxp0);
++		retval = -EMSGSIZE;
++		goto fail;
++	}

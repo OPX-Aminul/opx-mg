@@ -1,0 +1,62 @@
+#cloud-config
+hostname: opx-mg
+manage_etc_hosts: true
+users:
+  - name: opx
+    gecos: opx-mg
+    groups: [adm, sudo, plugdev, netdev]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    passwd: $6$YSMPAbgf5.B0JQOh$4u3LqfWoneqemAH6qCP.5nE5wLT.Ggdj8uWJ1z2nAqbgJ5FFXbwz03AhZ.QAiqgjaZ6.B4DHqKvhBRJIje71J1
+chpasswd:
+  expire: false
+  list: |
+    root:opx
+    opx:opx
+ssh_pwauth: true
+disable_root: false
+package_update: true
+package_upgrade: false
+packages:
+  - linux-modules-extra-generic
+  - linux-firmware
+  - usbutils
+  - pciutils
+  - iw
+  - wireless-tools
+  - wpasupplicant
+  - iproute2
+  - aircrack-ng
+  - pixiewps
+  - hashcat
+  - openssh-server
+  - python3
+  - git
+  - ca-certificates
+  - rfkill
+write_files:
+  - path: /etc/motd
+    content: |
+      opx-mg guest — USB Wi-Fi is hotplugged from Termux (usbredir).
+      lsusb / ip link / iw dev / dmesg | grep -i wlan
+      ssh from the phone: opx-mg ssh   (opx / opx)
+    owner: root:root
+    permissions: '0644'
+  - path: /etc/modules-load.d/opx-wifi.conf
+    content: |
+      ath9k_htc
+      rt2800usb
+      mt7601u
+      mt76x0u
+      mt76x2u
+      rtl8xxxu
+      rtw88_8821au
+      rtw88_8822bu
+    owner: root:root
+    permissions: '0644'
+runcmd:
+  - systemctl enable --now ssh || true
+  - modprobe ath9k_htc || true
+  - modprobe rtl8xxxu || true
+  - echo 'opx-mg cloud-init done' > /var/log/opx-mg-ready

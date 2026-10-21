@@ -1,0 +1,16 @@
+*.img
+*.qcow2
+*.fd
+seed.iso
+meta-data.local
+user-data.local
+.download/
+.cache/
+state/
+run/
+guest-disk/
+*.log
+*.pid
+host/usbredirect
+host/opx-usb-shim.so
+host/*.o
