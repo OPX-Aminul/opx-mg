@@ -273,9 +273,10 @@ Non-Xiaomi phones are unaffected.
 ## User flow
 
 ```
+# 64-bit Termux: the guest VM needs QEMU, which only the aarch64 repo ships
 pkg install termux-api qemu-system-aarch64-headless qemu-utils
 # Termux:API APK from the same source as Termux
-curl -fsSL https://raw.githubusercontent.com/OPX-Aminul/opx-mg/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/OPX-Aminul/opx-mg/main/install.sh | sh
 opx-mg                 # first run = setup, then start VM + watcher
 # plug Wi-Fi adapter, tap OK on the permission dialog
 # inside the VM: ip link, iw dev wlan0 scan

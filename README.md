@@ -45,11 +45,19 @@ In Termux:
 
 ```
 pkg update
+# 64-bit Termux (aarch64) — needed to boot the guest VM
 pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git
 ```
 
-On 32-bit Termux, leave out the two QEMU packages: the `arm` repo does not
-ship them (see [Architectures](#architectures)).
+On 32-bit Termux the same command stops with `Unable to locate package
+qemu-system-aarch64-headless`: the `arm` repo ships no QEMU at all. Install
+the non-QEMU packages only, and read [Architectures](#architectures) — the
+guest VM cannot boot there without a custom build.
+
+```
+# 32-bit Termux (armv7a)
+pkg install termux-api xorriso python curl git
+```
 
 Install the **Termux:API APK** from the same source as Termux.
 
@@ -64,8 +72,13 @@ or:
 ```
 git clone https://github.com/OPX-Aminul/opx-mg.git
 cd opx-mg
-./bin/opx-mg setup
+sh ./bin/opx-mg setup
 ```
+
+`sh ./bin/opx-mg` (rather than `./bin/opx-mg`) is deliberate: Termux has no
+`/usr/bin/env`, so running the script directly only works when the Termux
+exec wrapper is installed. The installed `opx-mg` command is a launcher that
+already handles this.
 
 `setup` detects the Termux userspace arch (`aarch64` or `armv7a`), downloads
 the matching `usbredirect-<arch>` and shim, plus the guest disk, from this
@@ -84,8 +97,16 @@ Ubuntu 24.04 cloud image.
 There is nothing to choose: `setup`, `update`, and `doctor` read the arch of
 the running Termux userspace (a 32-bit Termux on a 64-bit phone reports
 `armv8l` and gets `armv7a` assets). 32-bit Termux's `arm` repo has
-`termux-api` but no QEMU package, so the guest VM cannot boot there with
-stock packages. `setup` says so instead of failing halfway.
+`termux-api` but no QEMU package at all, and TUR only carries x86 QEMU
+(`qemu-system-i386`, `qemu-system-x86-64`), so the guest VM cannot boot
+there with stock packages. `setup` says so instead of failing halfway, and
+skips the guest disk download because nothing could run it.
+
+If you hit this on a phone whose hardware is actually 64-bit — common, since
+the Play Store build of Termux used to be 32-bit — check
+`getprop ro.product.cpu.abi`: `arm64-v8a` means installing Termux from
+F-Droid or GitHub (aarch64 build) fixes it, and the same phone then gets the
+aarch64 assets plus the QEMU package.
 
 ## Use
 
@@ -194,6 +215,21 @@ If you need help, send the bundle: it contains `opx-mg.log` and
 ```
 opx-mg logs bundle
 ```
+
+### `opx-mg: not found` right after install
+
+Termux has no `/usr/bin/env`, so a script whose first line is
+`#!/usr/bin/env sh` fails with `not found` when the Termux exec wrapper is
+absent (32-bit and custom bootstraps usually lack it). Re-run the installer:
+it writes `$PREFIX/bin/opx-mg` as a launcher that uses the absolute Termux
+`sh` path. For a git clone, run `sh ./bin/opx-mg setup` instead of
+`./bin/opx-mg setup`.
+
+### `Unable to locate package qemu-system-aarch64-headless`
+
+The `pkg install` line is the 64-bit one and the running Termux userspace is
+32-bit. That repo has no QEMU: see [Architectures](#architectures) for the
+`getprop ro.product.cpu.abi` check and for `OPX_QEMU_BIN`.
 
 ### Setup stops or downloads fail
 

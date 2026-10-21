@@ -32,13 +32,12 @@ opx_install_qemu() {
     [ "${OPX_NO_INSTALL:-0}" = "1" ] && return 1
     opx_is_termux || return 1
     if [ "$OPX_HOST_ARCH" = armv7a ]; then
-        # 32-bit Termux has no QEMU in termux-main; TUR builds it (arm).
-        info "32-bit Termux: QEMU comes from the TUR repo"
-        opx_termux_pkg_install tur-repo || return 1
-        opx_termux_pkg_install qemu-system-aarch64-9 qemu-utils-10 || return 1
-    else
-        opx_termux_pkg_install qemu-system-aarch64-headless qemu-utils || return 1
+        # termux-main's "arm" repo ships no qemu-* at all, and TUR only has
+        # qemu-system-i386 / qemu-system-x86-64. There is nothing to install,
+        # so say so instead of running pkg for a package that cannot exist.
+        return 1
     fi
+    opx_termux_pkg_install qemu-system-aarch64-headless qemu-utils || return 1
     command -v "$OPX_QEMU_BIN" >/dev/null 2>&1
 }
 
@@ -53,14 +52,18 @@ opx_check_qemu() {
     warn "$OPX_QEMU_BIN missing"
     if [ "$OPX_HOST_ARCH" = armv7a ]; then
         cat >&2 <<'EOF'
-32-bit Termux gets QEMU from the TUR repo:
+32-bit Termux cannot install QEMU: termux-main's "arm" repo has no qemu
+package (only aarch64 does) and TUR only ships x86 QEMU.
 
-  pkg install tur-repo
-  pkg install qemu-system-aarch64-9 qemu-utils-10
+Most 32-bit Termux installs sit on a 64-bit phone. Check the hardware ABI:
 
-That package provides the qemu-system-aarch64 binary and ships
-edk2-aarch64-code.fd. Automatic install is skipped when OPX_NO_INSTALL=1;
-use OPX_QEMU_BIN to point at a different QEMU.
+  getprop ro.product.cpu.abi      # arm64-v8a means install 64-bit Termux
+
+If it says arm64-v8a, install Termux (aarch64) from F-Droid or GitHub and
+re-run the installer; setup then picks the aarch64 assets and QEMU.
+
+If the phone really is 32-bit, point OPX_QEMU_BIN at your own 32-bit
+qemu-system-aarch64 build; nothing else is needed.
 EOF
         return 1
     fi
@@ -204,12 +207,15 @@ opx_fetch_disk() {
 opx_link_cli() {
     src=$OPX_ROOT/bin/opx-mg
     if opx_is_termux; then
+        # A symlink here would exec bin/opx-mg directly, and its
+        # '#!/usr/bin/env sh' shebang does not resolve on Termux.
+        opx_write_launcher "${PREFIX}/bin/opx-mg" "$src"
         dest="${PREFIX}/bin/opx-mg"
     else
         dest="${HOME}/.local/bin/opx-mg"
         mkdir -p "$(dirname "$dest")"
+        ln -sf "$src" "$dest"
     fi
-    ln -sf "$src" "$dest"
     info "CLI linked at $dest"
 }
 
@@ -242,7 +248,11 @@ opx_cmd_setup() {
     info "preparing cloud-init seed"
     opx_fetch_asset "seed.iso" "$OPX_IMAGES/seed.iso" || opx_build_seed
     info "preparing guest disk"
-    opx_fetch_disk || ok=1
+    if [ "$OPX_HOST_ARCH" = armv7a ] && ! command -v "$OPX_QEMU_BIN" >/dev/null 2>&1; then
+        warn "guest disk skipped: no QEMU to boot it with (set OPX_QEMU_BIN, then re-run setup)"
+    else
+        opx_fetch_disk || ok=1
+    fi
     info "linking CLI"
     opx_link_cli
     if [ "$ok" -ne 0 ]; then
