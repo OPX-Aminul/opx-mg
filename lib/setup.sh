@@ -27,17 +27,82 @@ opx_termux_pkg_install() {
     opx_run pkg install -y "$@"
 }
 
+# Everything the CLI itself needs. QEMU is arch-specific and handled below.
+OPX_BASE_PKGS="termux-api curl git python xorriso openssh"
+
+opx_qemu_pkgs() {
+    # Package names that provide a working qemu-system-aarch64.
+    case "$OPX_HOST_ARCH" in
+        aarch64) printf '%s' "qemu-system-aarch64-headless qemu-utils" ;;
+        # termux-main has no qemu for arm; TUR keeps the QEMU 9 build that
+        # still supports 32-bit hosts (qemu-system-aarch64-9 is built for arm).
+        armv7a)  printf '%s' "qemu-system-aarch64-9 qemu-utils-10" ;;
+        *)       printf '%s' "" ;;
+    esac
+}
+
+opx_install_deps() {
+    # One-shot install: pkg deps + repos, so `curl | sh` needs no manual step.
+    [ "${OPX_NO_INSTALL:-0}" = "1" ] && {
+        info "OPX_NO_INSTALL=1 — skipping package installation"
+        return 0
+    }
+    opx_is_termux || return 0
+    if ! command -v pkg >/dev/null 2>&1; then
+        warn "pkg not found — install packages by hand (see README)"
+        return 1
+    fi
+    # Skip the network round-trip when a previous setup already did this.
+    _ready=1
+    for _dep in termux-usb python3 xorriso ssh; do
+        command -v "$_dep" >/dev/null 2>&1 || _ready=0
+    done
+    command -v "$OPX_QEMU_BIN" >/dev/null 2>&1 || _ready=0
+    if [ "$_ready" -eq 1 ] && opx_arch_supported; then
+        info "packages already installed ($OPX_QEMU_BIN, termux-usb, python3, xorriso, ssh)"
+        return 0
+    fi
+    info "installing Termux packages ($OPX_BASE_PKGS)"
+    # Update first: a stale index is what makes 'unable to locate package'.
+    opx_run pkg update -y || warn "pkg update failed — continuing with the current index"
+    if [ "$OPX_HOST_ARCH" = armv7a ]; then
+        info "armv7a: adding TUR + x11 repos for the QEMU 9 build"
+        opx_run pkg install -y tur-repo x11-repo \
+            || warn "tur-repo/x11-repo install failed — QEMU may be unavailable"
+    fi
+    # shellcheck disable=SC2086
+    opx_run pkg install -y $OPX_BASE_PKGS || warn "some base packages failed to install"
+    _deps_qemu=$(opx_qemu_pkgs)
+    if [ -n "$_deps_qemu" ]; then
+        # shellcheck disable=SC2086
+        opx_run pkg install -y $_deps_qemu \
+            || warn "QEMU packages failed to install (see $OPX_LOG)"
+    fi
+    _missing=""
+    for _dep in termux-usb python3 xorriso; do
+        command -v "$_dep" >/dev/null 2>&1 || _missing="$_missing $_dep"
+    done
+    if [ -n "$_missing" ]; then
+        warn "still missing:$_missing — see $OPX_LOG"
+        return 1
+    fi
+    return 0
+}
+
 opx_install_qemu() {
     # Auto-install QEMU inside Termux unless OPX_NO_INSTALL=1.
     [ "${OPX_NO_INSTALL:-0}" = "1" ] && return 1
     opx_is_termux || return 1
     if [ "$OPX_HOST_ARCH" = armv7a ]; then
-        # termux-main's "arm" repo ships no qemu-* at all, and TUR only has
-        # qemu-system-i386 / qemu-system-x86-64. There is nothing to install,
-        # so say so instead of running pkg for a package that cannot exist.
-        return 1
+        # termux-main's "arm" repo has no qemu at all. TUR keeps QEMU 9 for
+        # 32-bit hosts and ships qemu-system-aarch64-9 there; its deps come
+        # from x11-repo.
+        opx_termux_pkg_install tur-repo x11-repo || return 1
     fi
-    opx_termux_pkg_install qemu-system-aarch64-headless qemu-utils || return 1
+    _qemu_pkgs=$(opx_qemu_pkgs)
+    [ -n "$_qemu_pkgs" ] || return 1
+    # shellcheck disable=SC2086
+    opx_termux_pkg_install $_qemu_pkgs || return 1
     command -v "$OPX_QEMU_BIN" >/dev/null 2>&1
 }
 
@@ -52,18 +117,16 @@ opx_check_qemu() {
     warn "$OPX_QEMU_BIN missing"
     if [ "$OPX_HOST_ARCH" = armv7a ]; then
         cat >&2 <<'EOF'
-32-bit Termux cannot install QEMU: termux-main's "arm" repo has no qemu
-package (only aarch64 does) and TUR only ships x86 QEMU.
+32-bit Termux has no QEMU in termux-main; it comes from TUR:
 
-Most 32-bit Termux installs sit on a 64-bit phone. Check the hardware ABI:
+  pkg install tur-repo x11-repo
+  pkg install qemu-system-aarch64-9 qemu-utils-10
 
-  getprop ro.product.cpu.abi      # arm64-v8a means install 64-bit Termux
-
-If it says arm64-v8a, install Termux (aarch64) from F-Droid or GitHub and
-re-run the installer; setup then picks the aarch64 assets and QEMU.
-
-If the phone really is 32-bit, point OPX_QEMU_BIN at your own 32-bit
-qemu-system-aarch64 build; nothing else is needed.
+That build still supports 32-bit hosts and provides qemu-system-aarch64.
+If pkg refuses, check the index (pkg update) or set OPX_QEMU_BIN to your
+own build. On a 64-bit phone, 64-bit Termux is faster: hardware ABI is
+'getprop ro.product.cpu.abi' = arm64-v8a, and stock Termux then has
+qemu-system-aarch64-headless.
 EOF
         return 1
     fi
@@ -223,6 +286,7 @@ opx_cmd_setup() {
     opx_mkdirs
     info "opx-mg ${OPX_MG_VERSION} setup (host ${OPX_HOST_ARCH}, guest ${OPX_GUEST_ARCH})"
     ok=0
+    opx_install_deps || ok=1
     if ! opx_arch_supported; then
         warn "unsupported host arch '${OPX_HOST_ARCH}' — only aarch64 and armv7a release binaries are published"
         ok=1
@@ -248,8 +312,8 @@ opx_cmd_setup() {
     info "preparing cloud-init seed"
     opx_fetch_asset "seed.iso" "$OPX_IMAGES/seed.iso" || opx_build_seed
     info "preparing guest disk"
-    if [ "$OPX_HOST_ARCH" = armv7a ] && ! command -v "$OPX_QEMU_BIN" >/dev/null 2>&1; then
-        warn "guest disk skipped: no QEMU to boot it with (set OPX_QEMU_BIN, then re-run setup)"
+    if ! command -v "$OPX_QEMU_BIN" >/dev/null 2>&1; then
+        warn "guest disk skipped: no QEMU to boot it with (install QEMU or set OPX_QEMU_BIN, then re-run setup)"
     else
         opx_fetch_disk || ok=1
     fi

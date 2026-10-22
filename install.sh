@@ -119,18 +119,17 @@ EOF
 chmod +x "$BIN"
 log "installer linked $BIN; running setup"
 echo "opx-mg: linked $BIN"
-echo "opx-mg: running setup (pulls usbredirect + guest disk from Releases)"
+echo "opx-mg: running setup (Termux packages + QEMU, usbredirect, guest disk)"
 "$BIN" setup || true
 echo
-echo "Next (host arch: $ARCH):"
 if [ "$ARCH" = armv7a ]; then
-    echo "  pkg install termux-api xorriso python curl git"
-    echo "  # 32-bit Termux: the arm repo has no QEMU, so the VM cannot boot."
-    echo "  # If 'getprop ro.product.cpu.abi' says arm64-v8a, install 64-bit Termux"
-    echo "  # and re-run this installer. Otherwise set OPX_QEMU_BIN to a custom build."
-else
-    echo "  pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git"
+    echo "opx-mg: 32-bit host — QEMU comes from TUR (tur-repo + qemu-system-aarch64-9),"
+    echo "        installed by setup above. If pkg refuses, 64-bit Termux is faster:"
+    echo "        'getprop ro.product.cpu.abi' = arm64-v8a means the phone supports it."
 fi
-echo "  # install the Termux:API APK from the same source as Termux"
-echo "  opx-mg"
+echo "opx-mg: packages are installed automatically; one step is still manual,"
+echo "        because Android will not let a shell install an APK:"
+echo "        install the Termux:API APK from the same source as Termux."
+echo
+echo "Then just run: opx-mg   (VM + USB watcher; plug the adapter, tap OK)"
 echo "Update later: opx-mg -u"

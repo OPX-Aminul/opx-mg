@@ -259,6 +259,8 @@ opx_qmp() {
     # send one QMP command (JSON object as $1), print reply
     sock=$OPX_RUN/qmp.sock
     [ -S "$sock" ] || die "QEMU is not running (no $sock)"
+    command -v python3 >/dev/null 2>&1 \
+        || die "python3 is required for QMP hotplug (pkg install python)"
     python3 - "$sock" "$1" <<'PY'
 import json, socket, sys
 sock_path, cmd = sys.argv[1], sys.argv[2]
@@ -293,7 +295,23 @@ opx_qemu_running() {
     kill -0 "$pid" 2>/dev/null
 }
 
+opx_qmp_ok() {
+    # opx_qmp_ok REPLY WHAT — a QMP error has no "return" member; an empty
+    # reply (python3 died, socket closed) must not count as success either.
+    case "$1" in
+        *'"return"'*) return 0 ;;
+        *) warn "${2:-QMP command} failed: ${1:-no reply from QEMU}" ; return 1 ;;
+    esac
+}
+
 opx_termux_usb() {
+    # termux-api is a normal package; the APK is not, so this only fixes half
+    # of a missing install. Self-heal the package, then say what is left.
+    if ! command -v termux-usb >/dev/null 2>&1 && opx_is_termux \
+        && [ "${OPX_NO_INSTALL:-0}" != "1" ] && command -v pkg >/dev/null 2>&1; then
+        info "termux-usb missing — installing termux-api"
+        opx_run pkg install -y termux-api || true
+    fi
     if command -v termux-usb >/dev/null 2>&1; then
         termux-usb "$@"
         return

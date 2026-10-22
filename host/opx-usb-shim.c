@@ -2,7 +2,7 @@
  * Minimal LD_PRELOAD helper: when usbredirect/libusb tries to open a
  * usbfs path Android will not allow, reuse TERMUX_USB_FD / LIBUSB_WRAP_FD
  * instead. Not a full libusb_wrap_sys_device implementation — it only
- * intercepts open() of /dev/bus/usb/* and /proc/self/fd/*.
+ * intercepts open() of /dev/bus/usb/... and /proc/self/fd/... paths.
  *
  * Build: clang -shared -fPIC -o opx-usb-shim.so opx-usb-shim.c -ldl
  */

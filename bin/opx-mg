@@ -42,6 +42,7 @@ Usage:
   opx-mg console         follow guest serial
   opx-mg ssh             ssh into the guest (opx / opx, port 2222)
   opx-mg usb list        termux-usb -l
+  opx-mg usb request DEV ask Android for permission only
   opx-mg usb attach DEV  permission + usbredirect + QMP usb-redir
   opx-mg usb detach DEV
   opx-mg watch           attach every newly plugged USB device

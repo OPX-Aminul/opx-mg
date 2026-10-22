@@ -2,10 +2,20 @@
 # USB list / request / usbredirect wrap / QMP hotplug.
 
 opx_usb_port_for() {
-    # stable-ish port from device path hash
-    dev=$1
-    n=$(printf '%s' "$dev" | wc -c)
-    printf '%s' $((OPX_USBREDIR_PORT_BASE + (n % 20)))
+    # One TCP port per bus/device so several dongles can be attached at once.
+    # Every /dev/bus/usb/BBB/DDD path is the same length, so hashing the path
+    # put all devices on the same port and the second bind always failed.
+    _p_id=$(opx_usb_id "$1")
+    _p_bus=${_p_id%%-*}
+    _p_num=${_p_id##*-}
+    _p_bus=$(printf '%s' "$_p_bus" | sed 's/^0*//')
+    _p_num=$(printf '%s' "$_p_num" | sed 's/^0*//')
+    _p_bus=${_p_bus:-1}
+    _p_num=${_p_num:-1}
+    case "${_p_bus}${_p_num}" in
+        *[!0-9]*|'') printf '%s' "$OPX_USBREDIR_PORT_BASE" ; return 0 ;;
+    esac
+    printf '%s' $((OPX_USBREDIR_PORT_BASE + (_p_bus * 20) + (_p_num - 1)))
 }
 
 opx_usb_id() {
@@ -14,7 +24,10 @@ opx_usb_id() {
 }
 
 opx_cmd_usb_list() {
-    opx_termux_usb -l | opx_json_list
+    # Capture first: `termux-usb -l | opx_json_list` returned the pipe's last
+    # status, so a failed listing still exited 0 with no output.
+    _list=$(opx_termux_usb -l) || exit 1
+    printf '%s\n' "$_list" | opx_json_list
 }
 
 opx_cmd_usb_request() {
@@ -46,6 +59,11 @@ log "usbredirect-wrap: fd=$FD node=$DEVNODE port=$PORT"
 # spice usbredirect accepts a usbfs path. The inherited fd is a usbfs
 # handle; /proc/self/fd/N is the portable way to name it without opening
 # /dev/bus/usb (which Android blocks).
+if [ -n "${OPX_USBREDIR_PIDFILE:-}" ]; then
+    # $$ stays the usbredirect pid after the exec below, so detach/stop can
+    # kill the process that actually holds the TCP port.
+    printf '%s\n' "$$" > "$OPX_USBREDIR_PIDFILE"
+fi
 if [ -x "$BIN" ]; then
     log "usbredirect-wrap: exec $BIN --device $DEVNODE --as 127.0.0.1:$PORT"
     exec "$BIN" --device "$DEVNODE" --as "127.0.0.1:${PORT}"
@@ -66,15 +84,9 @@ opx_qmp_attach_redir() {
     opx_qmp "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"${udev}\"}}" >/dev/null 2>&1 || true
     opx_qmp "{\"execute\":\"chardev-remove\",\"arguments\":{\"id\":\"${char}\"}}" >/dev/null 2>&1 || true
     reply=$(opx_qmp "{\"execute\":\"chardev-add\",\"arguments\":{\"id\":\"${char}\",\"backend\":{\"type\":\"socket\",\"data\":{\"addr\":{\"type\":\"inet\",\"data\":{\"host\":\"127.0.0.1\",\"port\":\"${port}\"}},\"server\":false}}}}")
-    printf '%s\n' "$reply" | grep -q '"error"' && {
-        warn "QMP chardev-add failed: $reply"
-        return 1
-    }
+    opx_qmp_ok "$reply" "QMP chardev-add" || return 1
     reply=$(opx_qmp "{\"execute\":\"device_add\",\"arguments\":{\"driver\":\"usb-redir\",\"chardev\":\"${char}\",\"id\":\"${udev}\",\"bus\":\"xhci.0\"}}")
-    printf '%s\n' "$reply" | grep -q '"error"' && {
-        warn "QMP device_add usb-redir failed: $reply"
-        return 1
-    }
+    opx_qmp_ok "$reply" "QMP device_add usb-redir" || return 1
     return 0
 }
 
@@ -108,15 +120,17 @@ opx_cmd_usb_attach() {
     OPX_USBREDIRECT_BIN=$OPX_BIN/usbredirect
     OPX_USBREDIR_PORT=$port
     OPX_USB_LOG=$OPX_LOG
-    export OPX_USBREDIRECT_BIN OPX_USBREDIR_PORT OPX_USB_LOG
+    OPX_USBREDIR_PIDFILE=$pidfile
+    export OPX_USBREDIRECT_BIN OPX_USBREDIR_PORT OPX_USB_LOG OPX_USBREDIR_PIDFILE
+    rm -f "$pidfile"
     # -E exports TERMUX_USB_FD; -e is the wrap script (single argv).
-    # Run in background so opx-mg returns; usbredirect holds the fd.
+    # The wrap script records its own pid in $OPX_USBREDIR_PIDFILE, which is
+    # the usbredirect pid after exec — $! would only be the subshell.
     (
-        opx_termux_usb -E -e "$wrap" "$dev" >>"$OPX_LOG" 2>&1
-    ) &
+        exec termux-usb -E -e "$wrap" "$dev"
+    ) >>"$OPX_LOG" 2>&1 &
     rpid=$!
-    echo "$rpid" > "$pidfile"
-    info "usbredirect started pid $rpid, log -> $OPX_LOG"
+    info "usbredirect starting (launcher pid $rpid), log -> $OPX_LOG"
     # Give usbredirect a moment to bind the TCP port.
     i=0
     ready=0
@@ -143,8 +157,13 @@ PY
     if [ "$ready" -ne 1 ]; then
         warn "usbredirect did not bind 127.0.0.1:$port — see $OPX_LOG"
         warn "if the log says the device path is invalid, the usbredirect build cannot open /proc/self/fd/N"
+        _dead=$(cat "$pidfile" 2>/dev/null || printf '%s' "$rpid")
+        kill "$_dead" 2>/dev/null || true
+        rm -f "$pidfile"
         return 1
     fi
+    # The wrap script owns the pidfile; fall back to the launcher pid.
+    [ -f "$pidfile" ] || printf '%s\n' "$rpid" > "$pidfile"
     if ! opx_qmp_attach_redir "$id" "$port"; then
         warn "QMP hotplug failed — usbredirect is up, try: opx-mg usb attach $dev"
         return 1
@@ -158,7 +177,12 @@ opx_cmd_usb_detach() {
     dev=$1
     [ -n "$dev" ] || die "usage: opx-mg usb detach /dev/bus/usb/BBB/DDD"
     id=$(opx_usb_id "$dev")
-    opx_qmp_detach_redir "$id"
+    if opx_qemu_running; then
+        opx_qmp_detach_redir "$id"
+    else
+        # No QEMU socket: still clean the state files instead of dying here.
+        warn "VM is not running — removing local state only"
+    fi
     pidfile=$OPX_RUN/usbredir-$id.pid
     if [ -f "$pidfile" ]; then
         kpid=$(cat "$pidfile")

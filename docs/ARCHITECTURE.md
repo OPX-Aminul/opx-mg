@@ -65,9 +65,9 @@ Android UsbManager  (permission dialog once)
     |
 termux-usb -E -e ...   SCM_RIGHTS fd  ->  TERMUX_USB_FD
     |
-usbredirect --device /proc/self/fd/$TERMUX_USB_FD --as 127.0.0.1:23456
-    |
-TCP 127.0.0.1:23456  (usbredir protocol)
+usbredirect --device /proc/self/fd/$TERMUX_USB_FD --as 127.0.0.1:PORT
+    |                                     # PORT is per bus/device
+TCP 127.0.0.1:PORT  (usbredir protocol)
     |
 qemu-system-aarch64  -device qemu-xhci  -device usb-redir,chardev=...
     |
@@ -93,13 +93,19 @@ this repo's releases, a guest image that already has Wi-Fi firmware and
 out-of-tree Realtek/MediaTek modules, and a watcher that attaches a dongle
 the moment `termux-usb -l` sees it.
 
+QEMU source differs by host arch, because `termux-main` only builds it for
+64-bit: aarch64 uses `qemu-system-aarch64-headless`, while armv7a uses TUR's
+`qemu-system-aarch64-9` (QEMU 9 is the last series built for 32-bit hosts)
+plus `qemu-common-10` for `edk2-aarch64-code.fd`. `setup` picks the right
+set, so the installer stays one command on both arches.
+
 ## Components
 
 ```
 opx-mg                 user-facing CLI (this repo, POSIX sh)
   bin/opx-mg           dispatcher
   lib/common.sh        paths, logging, download
-  lib/setup.sh         first-run: Termux:API check, fetch release assets
+  lib/setup.sh         first-run: pkg deps, QEMU per arch, release assets
   lib/vm.sh            start/stop QEMU, QMP helper
   lib/usb.sh           list / request / usbredirect / QMP hotplug
   lib/watch.sh         poll termux-usb -l, attach on connect
@@ -273,9 +279,7 @@ Non-Xiaomi phones are unaffected.
 ## User flow
 
 ```
-# 64-bit Termux: the guest VM needs QEMU, which only the aarch64 repo ships
-pkg install termux-api qemu-system-aarch64-headless qemu-utils
-# Termux:API APK from the same source as Termux
+# Termux:API APK from the same source as Termux (the only manual step)
 curl -fsSL https://raw.githubusercontent.com/OPX-Aminul/opx-mg/main/install.sh | sh
 opx-mg                 # first run = setup, then start VM + watcher
 # plug Wi-Fi adapter, tap OK on the permission dialog

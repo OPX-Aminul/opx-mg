@@ -41,38 +41,36 @@ Stryker (rooted chroot). Those are documented in `docs/RESEARCH.md`.
 
 ## Install
 
-In Termux:
-
-```
-pkg update
-# 64-bit Termux (aarch64) — needed to boot the guest VM
-pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git
-```
-
-On 32-bit Termux the same command stops with `Unable to locate package
-qemu-system-aarch64-headless`: the `arm` repo ships no QEMU at all. Install
-the non-QEMU packages only, and read [Architectures](#architectures) — the
-guest VM cannot boot there without a custom build.
-
-```
-# 32-bit Termux (armv7a)
-pkg install termux-api xorriso python curl git
-```
-
-Install the **Termux:API APK** from the same source as Termux.
-
-Then either:
+One command in Termux installs everything — packages, QEMU for your arch
+(`termux-main` on aarch64, TUR's QEMU 9 on 32-bit), `usbredirect`, the
+cloud-init seed and the guest disk:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/OPX-Aminul/opx-mg/main/install.sh | sh
 ```
 
-or:
+The only manual step left is an APK, because Android does not let a shell
+install one: get **Termux:API** from the same source as Termux (F-Droid or
+GitHub, not Play Store).
+
+Or from a clone:
 
 ```
 git clone https://github.com/OPX-Aminul/opx-mg.git
 cd opx-mg
 sh ./bin/opx-mg setup
+```
+
+To install packages by hand instead (`setup` runs exactly this):
+
+```
+# 64-bit Termux (aarch64)
+pkg install termux-api qemu-system-aarch64-headless qemu-utils xorriso python curl git openssh
+
+# 32-bit Termux (armv7a): QEMU 9 comes from TUR, which still builds for arm
+pkg install termux-api xorriso python curl git openssh
+pkg install tur-repo x11-repo
+pkg install qemu-system-aarch64-9 qemu-utils-10
 ```
 
 `sh ./bin/opx-mg` (rather than `./bin/opx-mg`) is deliberate: Termux has no
@@ -91,22 +89,24 @@ Ubuntu 24.04 cloud image.
 
 | Host | USB binaries | Guest VM |
 |------|--------------|----------|
-| `aarch64` (64-bit Termux) | `usbredirect-aarch64` + `opx-usb-shim-aarch64.so` | `qemu-system-aarch64` from Termux |
-| `armv7a` (32-bit Termux) | `usbredirect-armv7a` + `opx-usb-shim-armv7a.so` | needs a custom QEMU via `OPX_QEMU_BIN` |
+| `aarch64` (64-bit Termux) | `usbredirect-aarch64` + `opx-usb-shim-aarch64.so` | `qemu-system-aarch64-headless` from `termux-main` |
+| `armv7a` (32-bit Termux) | `usbredirect-armv7a` + `opx-usb-shim-armv7a.so` | `qemu-system-aarch64` from TUR (`qemu-system-aarch64-9`) |
 
 There is nothing to choose: `setup`, `update`, and `doctor` read the arch of
 the running Termux userspace (a 32-bit Termux on a 64-bit phone reports
-`armv8l` and gets `armv7a` assets). 32-bit Termux's `arm` repo has
-`termux-api` but no QEMU package at all, and TUR only carries x86 QEMU
-(`qemu-system-i386`, `qemu-system-x86-64`), so the guest VM cannot boot
-there with stock packages. `setup` says so instead of failing halfway, and
-skips the guest disk download because nothing could run it.
+`armv8l` and gets `armv7a` assets).
 
-If you hit this on a phone whose hardware is actually 64-bit — common, since
-the Play Store build of Termux used to be 32-bit — check
-`getprop ro.product.cpu.abi`: `arm64-v8a` means installing Termux from
-F-Droid or GitHub (aarch64 build) fixes it, and the same phone then gets the
-aarch64 assets plus the QEMU package.
+32-bit Termux has no QEMU in `termux-main`, which is why
+`pkg install qemu-system-aarch64-headless` fails there. TUR keeps the QEMU 9
+series for 32-bit hosts: its `qemu-system-aarch64-9` is a 32-bit ARM build
+that still carries `bin/qemu-system-aarch64`, and `qemu-common-10` supplies
+`share/qemu/edk2-aarch64-code.fd`. `setup` installs `tur-repo` + `x11-repo`
+and those two packages automatically.
+
+The guest itself is arm64 (`OPX_GUEST_ARCH`) on both hosts, so 32-bit
+Termux runs it in TCG with 1G / 2 vCPU by default — slower than aarch64. If
+the phone is 64-bit, `getprop ro.product.cpu.abi` says `arm64-v8a`, and
+64-bit Termux gets the aarch64 assets plus the stock QEMU package.
 
 ## Use
 
@@ -184,10 +184,9 @@ Login: `opx` / `opx` (root password `opx`).
 
 - TCG is slow. Monitor-mode packet rates will not match a native
   NetHunter kernel.
-- 32-bit armv7a: architecture detection, `usbredirect-armv7a`, and the shim
-  are built and installed, but 32-bit Termux's repo has no QEMU package, so
-  the guest VM cannot start there. Point `OPX_QEMU_BIN` at a 32-bit QEMU
-  build if you have one. Guest defaults drop to 1G / 2 vCPU.
+- 32-bit armv7a: QEMU 9 comes from TUR and runs the arm64 guest in TCG, so
+  it is the slowest supported setup. Guest defaults drop to 1G / 2 vCPU.
+  `OPX_QEMU_BIN` overrides the binary for a custom build.
 - One `usbredirect` process per device.
 - Xiaomi / MIUI often reports full-speed dongles as low-speed
   (`Invalid ep0 maxpacket: 64`). That is a host-stack lie, not a Termux
@@ -227,9 +226,17 @@ it writes `$PREFIX/bin/opx-mg` as a launcher that uses the absolute Termux
 
 ### `Unable to locate package qemu-system-aarch64-headless`
 
-The `pkg install` line is the 64-bit one and the running Termux userspace is
-32-bit. That repo has no QEMU: see [Architectures](#architectures) for the
-`getprop ro.product.cpu.abi` check and for `OPX_QEMU_BIN`.
+That is the aarch64 package name and the running Termux userspace is 32-bit,
+where `termux-main` has no QEMU. Use TUR's QEMU 9 build (what `setup` does):
+
+```
+pkg install tur-repo x11-repo
+pkg install qemu-system-aarch64-9 qemu-utils-10
+```
+
+`opx-mg doctor` then shows the QEMU path. If TUR is unreachable, a 64-bit
+Termux is the faster route on a 64-bit phone (`getprop ro.product.cpu.abi`
+= `arm64-v8a`); `OPX_QEMU_BIN` still overrides the binary.
 
 ### Setup stops or downloads fail
 
@@ -243,8 +250,9 @@ The `pkg install` line is the 64-bit one and the running Termux userspace is
   source as Termux.
 - `edk2-aarch64-code.fd not found` means the QEMU package is incomplete:
   `pkg install qemu-system-aarch64-headless`.
-- On 32-bit Termux QEMU is not available in the stock repo (see
-  [Architectures](#architectures)); set `OPX_QEMU_BIN`.
+- On 32-bit Termux QEMU comes from TUR (see
+  [Architectures](#architectures)); if `pkg` cannot reach it, set
+  `OPX_QEMU_BIN` to your own build.
 
 ### The VM does not boot
 

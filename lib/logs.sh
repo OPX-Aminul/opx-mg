@@ -17,6 +17,14 @@ opx_logs_system_info() {
         printf 'termux-usb: %s\n' "$(command -v termux-usb 2>/dev/null || echo MISSING)"
         printf 'usbredirect: %s\n' "$([ -x "$OPX_BIN/usbredirect" ] && echo "$OPX_BIN/usbredirect" || echo MISSING)"
         printf 'vm: %s\n' "$(opx_qemu_running && echo running || echo stopped)"
+        printf 'attached:\n'
+        _any=0
+        for _st in "$OPX_STATE"/attached-*; do
+            [ -f "$_st" ] || continue
+            _any=1
+            printf '  %s\n' "$(cat "$_st")"
+        done
+        [ "$_any" -eq 0 ] && printf '  none\n'
         printf 'usb devices:\n'
         if command -v termux-usb >/dev/null 2>&1; then
             opx_termux_usb -l 2>/dev/null || printf '  (termux-usb -l failed)\n'

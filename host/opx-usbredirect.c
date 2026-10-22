@@ -181,7 +181,7 @@ int main(int argc, char **argv)
     const char *device = NULL;
     const char *as = NULL;
     char hostaddr[64];
-    int fd = -1, port = 23456, o, server_fd, on = 1, flags;
+    int fd = -1, port = 23456, o, server_fd, on = 1, flags, rc;
     struct sockaddr_in addr;
     struct sigaction act;
     libusb_device_handle *handle = NULL;
@@ -248,12 +248,30 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &act, NULL);
     sigaction(SIGQUIT, &act, NULL);
 
-    if (libusb_init(&ctx)) {
-        fprintf(stderr, "libusb_init failed\n");
+    /* libusb documents LIBUSB_OPTION_NO_DEVICE_DISCOVERY as init-time only:
+     * "This option should only be used with libusb_init_context() otherwise
+     * unspecified behavior may occur", and skipping the device scan is what
+     * Android needs because /dev/bus/usb cannot be scanned there. Setting it
+     * after libusb_init() (as this program used to) did nothing. */
+#if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x0100010A)
+    {
+        struct libusb_init_option opts[1];
+        opts[0].option = LIBUSB_OPTION_NO_DEVICE_DISCOVERY;
+        opts[0].value.ival = 1;
+        rc = libusb_init_context(&ctx, opts, 1);
+        if (rc) {
+            fprintf(stderr, "libusb_init_context failed: %s\n",
+                    libusb_error_name(rc));
+            return 1;
+        }
+    }
+#else
+    libusb_set_option(NULL, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+    rc = libusb_init(&ctx);
+    if (rc) {
+        fprintf(stderr, "libusb_init failed: %s\n", libusb_error_name(rc));
         return 1;
     }
-#ifdef LIBUSB_OPTION_NO_DEVICE_DISCOVERY
-    libusb_set_option(ctx, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
 #endif
 #if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x01000107)
     if (libusb_wrap_sys_device(ctx, (intptr_t)fd, &handle) != 0 || handle == NULL) {

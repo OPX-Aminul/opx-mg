@@ -13,6 +13,10 @@ opx_cmd_start() {
     fi
     [ -f "$OPX_IMAGES/disk.qcow2" ] || die "no guest disk — run: opx-mg setup"
     [ -e "$OPX_IMAGES/edk2-aarch64-code.fd" ] || die "no UEFI firmware — pkg install qemu-system-aarch64-headless"
+    if ! command -v "${OPX_QEMU_BIN:-qemu-system-aarch64}" >/dev/null 2>&1; then
+        # Self-heal: setup installs QEMU, and start should not need a rerun.
+        opx_check_qemu || true
+    fi
     qemu=$(opx_qemu_bin) || die "${OPX_QEMU_BIN} not on PATH (set OPX_QEMU_BIN)"
     seed_args=""
     if [ -s "$OPX_IMAGES/seed.iso" ]; then
